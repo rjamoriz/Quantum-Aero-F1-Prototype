@@ -1,5 +1,9 @@
 # System Design: Quantum-Aero F1 Prototype
 
+![Wind Tunnel Aerodynamic Testing](assets/quantum%20aerodynamic.jpeg)
+
+![CFD Aerodynamic Analysis](assets/F1_Lambda2_Top-606x380.png)
+
 ## Architecture Overview
 
 The system follows a microservice architecture to allow independent scaling of physics, ML, and quantum components.
