@@ -140,7 +140,7 @@ flowchart LR
 **QUBO Formulation for Aerodynamic Optimization:**
 
 $$
-H_{QUBO} = \sum_{i,j} Q_{ij} x_i x_j = -\alpha \cdot C_L + \beta \cdot C_D + \gamma \sum_{i} (x_i - x_{i,constraint})^2
+H_{\text{QUBO}} = \sum_{i,j} Q_{i,j} x_i x_j = -\alpha \cdot C_L + \beta \cdot C_D + \gamma \sum_{i} (x_i - x_{i,\text{constraint}})^2
 $$
 
 Where:

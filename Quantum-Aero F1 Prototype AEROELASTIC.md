@@ -266,7 +266,7 @@ Where $b_{i,k} \in \{0,1\}$ with one-hot constraint: $\sum_k b_{i,k} = 1$
 **Quadratic Cost**:
 
 $$
-H_{QUBO} = \sum_{i,j} Q_{ij} x_i x_j = \mathbf{x}^T \mathbf{Q} \mathbf{x}
+H_{\text{QUBO}} = \sum_{i,j} Q_{i,j} x_i x_j = \mathbf{x}^T \mathbf{Q} \mathbf{x}
 $$
 
 **One-Hot Penalty**:
