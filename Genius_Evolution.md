@@ -55,12 +55,34 @@ class AeroTransformer:
     - Loss: Physics-informed (continuity + momentum)
 ```
 
+**Physics-Informed Loss Function:**
+
+$$
+\mathcal{L}_{total} = \mathcal{L}_{data} + \lambda_1 \mathcal{L}_{continuity} + \lambda_2 \mathcal{L}_{momentum}
+$$
+
+$$
+\mathcal{L}_{continuity} = \left\|\nabla \cdot \mathbf{u}\right\|^2, \quad \mathcal{L}_{momentum} = \left\|\rho\left(\frac{\partial \mathbf{u}}{\partial t} + \mathbf{u} \cdot \nabla \mathbf{u}\right) + \nabla p - \mu \nabla^2 \mathbf{u}\right\|^2
+$$
+
 #### **Generative Adversarial Networks for Design**
 
 * **GAN Architecture**: StyleGAN3 adapted for aerodynamic surfaces
 * **Capability**: Generate novel wing/diffuser geometries optimized for downforce
 * **Constraint Handling**: Physics-based discriminator ensures realistic flows
 * **Output**: 1000+ design candidates per optimization cycle
+
+**Aerodynamic Force Coefficients:**
+
+$$
+C_L = \frac{L}{\frac{1}{2}\rho V^2 S}, \quad C_D = \frac{D}{\frac{1}{2}\rho V^2 S}, \quad L/D = \frac{C_L}{C_D}
+$$
+
+**Pressure Coefficient Distribution:**
+
+$$
+C_p(x,y,z) = \frac{p(x,y,z) - p_\infty}{\frac{1}{2}\rho V_\infty^2}
+$$
 
 ### 2. Real-Time RANS Surrogate
 
@@ -76,6 +98,14 @@ class AeroTransformer:
 * **ML-Enhanced k-ω SST**: Neural network corrections to closure coefficients
 * **Training**: Supervised learning on DNS data
 * **Benefit**: Improved separation prediction in adverse pressure gradients
+
+**RANS Equations with ML Corrections:**
+
+$$
+\frac{\partial \bar{u}_i}{\partial t} + \bar{u}_j \frac{\partial \bar{u}_i}{\partial x_j} = -\frac{1}{\rho}\frac{\partial \bar{p}}{\partial x_i} + \nu \frac{\partial^2 \bar{u}_i}{\partial x_j \partial x_j} - \frac{\partial}{\partial x_j}\overline{u'_i u'_j} + f_{ML}(\mathbf{x}, Re)
+$$
+
+Where $f_{ML}$ is the neural network correction term trained on DNS data.
 
 ### 3. Multi-Fidelity Optimization
 
@@ -107,6 +137,18 @@ flowchart LR
 * Simple QUBO formulations
 * Single-objective optimization (maximize downforce)
 
+**QUBO Formulation for Aerodynamic Optimization:**
+
+$$
+H_{QUBO} = \sum_{i,j} Q_{ij} x_i x_j = -\alpha \cdot C_L + \beta \cdot C_D + \gamma \sum_{i} (x_i - x_{i,constraint})^2
+$$
+
+Where:
+- $C_L$ = Lift coefficient (downforce)
+- $C_D$ = Drag coefficient
+- $x_i$ = Binary design variables (geometry parameters)
+- $\alpha, \beta, \gamma$ = Weighting coefficients
+
 ### Phase 2: Hybrid Quantum-Classical (Q2-Q3 2026)
 
 **Variational Quantum Eigensolver (VQE) Integration**
@@ -130,6 +172,16 @@ graph TD
     style H fill:#10b981,stroke:#059669,stroke-width:3px,color:#fff
 ```
 
+**QAOA Circuit Ansatz:**
+
+$$
+|\psi(\boldsymbol{\gamma}, \boldsymbol{\beta})\rangle = U_B(\beta_p) U_C(\gamma_p) \cdots U_B(\beta_1) U_C(\gamma_1) |+\rangle^{\otimes n}
+$$
+
+$$
+U_C(\gamma) = e^{-i\gamma H_{QUBO}}, \quad U_B(\beta) = e^{-i\beta \sum_i X_i}
+$$
+
 **Key Innovations**:
 * **Warm-Start**: Initialize quantum circuits with ML-predicted solutions
 * **Adaptive Depth**: Dynamically adjust QAOA layers based on problem complexity
@@ -143,6 +195,16 @@ graph TD
 * **Embedding**: Minor-embedding optimization for Pegasus topology
 * **Hybrid Solver**: Quantum annealing + classical tabu search
 * **Application**: Multi-element wing optimization with 50+ design variables
+
+**Quantum Annealing Hamiltonian:**
+
+$$
+H(s) = (1-s)H_{initial} + s \cdot H_{QUBO}, \quad s \in [0,1]
+$$
+
+$$
+H_{initial} = -\sum_i X_i, \quad \text{(uniform superposition)}
+$$
 
 ### Phase 4: Fault-Tolerant Era (2027+)
 
