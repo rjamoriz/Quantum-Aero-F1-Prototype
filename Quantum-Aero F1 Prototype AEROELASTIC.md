@@ -1,5 +1,7 @@
 # Aeroelastic Analysis for F1 Quantum-Aero Prototype
 
+![F1 Wing Aeroelastic CFD Analysis](assets/race_car_rear_wing_cfd_fi-670x300.png)
+
 ## Overview
 
 Aeroelasticity is the study of the interaction between aerodynamic forces and structural deformation. For F1 cars, understanding and controlling aeroelastic effects is critical to maintaining performance, safety, and regulatory compliance at high speeds.
