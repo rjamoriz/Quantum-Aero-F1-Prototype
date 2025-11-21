@@ -2,8 +2,6 @@
 
 ![Wind Tunnel Aerodynamic Testing](assets/quantum%20aerodynamic.jpeg)
 
-![CFD Aerodynamic Analysis](assets/F1_Lambda2_Top-606x380.png)
-
 ## Phase 1 — Foundation
 
 ### 1.1 Dataset & Research
