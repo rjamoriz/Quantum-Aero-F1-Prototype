@@ -1,5 +1,7 @@
 # Project Plan: Quantum-Aero F1 Prototype
 
+![F1 Aerodynamic Development](assets/Pratik-Blog-Final.png)
+
 ## Overview
 
 This document defines the high-level planning for the Quantum‑Aero prototype: a hybrid Generative AI + Quantum Optimization + GPU‑accelerated aerodynamic simulator built for F1 aerodynamic research.
