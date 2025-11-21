@@ -310,12 +310,12 @@ Where:
 **Binary Encoding Example** (stiffener placement):
 
 $$
-H_{\text{QUBO}} = \sum_{i=1}^{N} h_i s_i + \sum_{i<j} J_{ij} s_i s_j
+H_{\text{QUBO}} = \sum_{i=1}^{N} h_i s_i + \sum_{i<j} J_{i,j} s_i s_j
 $$
 
 Where:
 - $h_i$ = Local cost (mass penalty)
-- $J_{ij}$ = Interaction term (structural coupling)
+- $J_{i,j}$ = Interaction term (structural coupling)
 
 **Surrogate Approximation**:
 
