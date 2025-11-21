@@ -310,7 +310,7 @@ Where:
 **Binary Encoding Example** (stiffener placement):
 
 $$
-H_{QUBO} = \sum_{i=1}^{N} h_i s_i + \sum_{i<j} J_{ij} s_i s_j
+H_{\text{QUBO}} = \sum_{i=1}^{N} h_i s_i + \sum_{i<j} J_{ij} s_i s_j
 $$
 
 Where:
