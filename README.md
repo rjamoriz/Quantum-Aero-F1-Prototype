@@ -1,5 +1,7 @@
 # Quantum-Aero F1 Prototype
 
+![F1 Racing](assets/f1-racing.jpg)
+
 A next-generation hybrid **AI + Quantum Computing + GPU Accelerated Aerodynamics** platform designed to optimize aerodynamic performance for **Formula 1** development. This prototype integrates classical CFD physics, surrogate deep-learning models, and quantum optimization workflows into a unified MERN-based application.
 
 ## 🚀 Purpose
