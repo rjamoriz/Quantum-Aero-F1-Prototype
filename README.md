@@ -77,6 +77,15 @@ flowchart TD
     subgraph Quantum_Node
         E
     end
+    
+    style A fill:#00d4ff,stroke:#0099cc,stroke-width:3px,color:#000
+    style B fill:#ff6b35,stroke:#cc5529,stroke-width:3px,color:#fff
+    style C fill:#7c3aed,stroke:#5b21b6,stroke-width:3px,color:#fff
+    style D fill:#10b981,stroke:#059669,stroke-width:3px,color:#fff
+    style E fill:#f59e0b,stroke:#d97706,stroke-width:3px,color:#000
+    style F fill:#ec4899,stroke:#be185d,stroke-width:3px,color:#fff
+    style GPU_Node fill:#1e1b4b,stroke:#7c3aed,stroke-width:2px,color:#fff
+    style Quantum_Node fill:#1e293b,stroke:#f59e0b,stroke-width:2px,color:#fff
 ```
 
 ---
