@@ -321,8 +321,6 @@ Where:
 
 $$
 V_f(\mathbf{s}) \approx V_{f,0} + \sum_i \frac{\partial V_f}{\partial s_i} s_i + \sum_{i<j} \frac{\partial^2 V_f}{\partial s_i \partial s_j} s_i s_j
-$$
-
 ### Hybrid Optimization Loop
 
 ```mermaid
