@@ -1,0 +1,156 @@
+/**
+ * Anthropic Claude Hook
+ * Handles Claude API interactions from React frontend
+ */
+import { useState } from 'react';
+
+export interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
+
+export interface StreamOptions {
+  model?: string;
+  temperature?: number;
+  max_tokens?: number;
+}
+
+export const useAnthropic = () => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Stream message from Claude with Server-Sent Events
+   */
+  const streamMessage = async function* (
+    messages: Message[],
+    context?: Record<string, any>,
+    options?: StreamOptions
+  ): AsyncGenerator<string, void, unknown> {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Get auth token
+      const token = localStorage.getItem('auth_token');
+
+      // Call backend API that proxies to Master Orchestrator
+      const response = await fetch('/api/claude/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
+        body: JSON.stringify({
+          messages: messages.map(m => ({
+            role: m.role,
+            content: m.content
+          })),
+          context,
+          ...options
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      // Read streaming response
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+
+            if (data === '[DONE]') {
+              break;
+            }
+
+            try {
+              const parsed = JSON.parse(data);
+
+              if (parsed.type === 'content_block_delta') {
+                yield parsed.delta.text;
+              } else if (parsed.type === 'error') {
+                throw new Error(parsed.error);
+              }
+            } catch (parseError) {
+              console.warn('Failed to parse SSE data:', parseError);
+            }
+          }
+        }
+      }
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(errorMessage);
+      console.error('Stream error:', err);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * Send message without streaming (single response)
+   */
+  const sendMessage = async (
+    messages: Message[],
+    context?: Record<string, any>,
+    options?: StreamOptions
+  ): Promise<string> => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const token = localStorage.getItem('auth_token');
+
+      const response = await fetch('/api/claude/message', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
+        body: JSON.stringify({
+          messages: messages.map(m => ({
+            role: m.role,
+            content: m.content
+          })),
+          context,
+          ...options
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data.content;
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(errorMessage);
+      console.error('Message error:', err);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return {
+    streamMessage,
+    sendMessage,
+    isLoading,
+    error
+  };
+};
