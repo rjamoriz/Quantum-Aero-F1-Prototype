@@ -1,4 +1,4 @@
-# Q-Aero Integration Plan: Quantum-Enhanced Aerodynamic Optimization Platform
+Ther eis# Q-Aero Integration Plan: Quantum-Enhanced Aerodynamic Optimization Platform
 
 **Version:** 1.0
 **Date:** 2025-11-24
@@ -19,8 +19,11 @@
 8. [Integration Checkpoints](#integration-checkpoints)
 9. [Traceability Matrix](#traceability-matrix)
 10. [Development Workflow](#development-workflow)
-11. [Risk Register](#risk-register)
-12. [Deployment Strategy](#deployment-strategy)
+11. [Synthetic Data Generation & Visualization](#synthetic-data-generation--visualization)
+12. [Local Development Setup (RTX 4070 Proof of Concept)](#local-development-setup-rtx-4070-proof-of-concept)
+13. [Production-Ready Docker & Microservices Architecture](#production-ready-docker--microservices-architecture)
+14. [Risk Register](#risk-register)
+15. [Deployment Strategy](#deployment-strategy)
 
 ---
 
@@ -2607,6 +2610,3398 @@ Closes #42
 - [ ] No breaking changes (or properly versioned)
 - [ ] Error handling adequate
 - [ ] Edge cases covered
+
+---
+
+## Synthetic Data Generation & Visualization
+
+### Overview
+
+Synthetic data generation is **critical** for training ML surrogate models and validating aerodynamic predictions. This section outlines frameworks, data sources, and visualization tools for generating and analyzing aerodynamic data for F1 components and airfoils.
+
+**Key Requirements:**
+- Generate 10,000+ CFD simulations for ML training
+- Access validated NACA/NASA airfoil data
+- Create synthetic geometries for design space exploration
+- Visualize steady-state and transient flow fields
+- Animate dynamic phenomena (DRS activation, corner exit)
+
+---
+
+### Synthetic Data Generation Frameworks
+
+#### Category 1: High-Fidelity CFD Simulation
+
+##### OpenFOAM (Open-Source CFD)
+
+**Description:** Industry-standard open-source CFD toolkit for complex fluid dynamics.
+
+**Use Cases:**
+- High-fidelity validation runs
+- Transient aerodynamics (DRS activation, corner exit)
+- Fluid-structure interaction (FSI) with preCICE
+
+**Key Capabilities:**
+- Incompressible/compressible solvers (simpleFoam, pimpleFoam)
+- Turbulence models (k-ω SST, LES, DES)
+- Dynamic mesh for moving boundaries
+- Parallel execution (MPI)
+
+**Installation (VS Codespaces):**
+```bash
+# Docker container with OpenFOAM
+docker pull openfoam/openfoam10-paraview510
+
+# Or install in Ubuntu
+sudo sh -c "wget -O - https://dl.openfoam.org/gpg.key | apt-key add -"
+sudo add-apt-repository http://dl.openfoam.org/ubuntu
+sudo apt-get update
+sudo apt-get install openfoam10
+```
+
+**Example Workflow:**
+```bash
+# 1. Create case directory
+mkdir -p cases/wing_case
+cd cases/wing_case
+cp -r $FOAM_TUTORIALS/incompressible/simpleFoam/airFoil2D/* .
+
+# 2. Preprocess mesh
+blockMesh
+snappyHexMesh -overwrite
+
+# 3. Set boundary conditions (edit 0/ directory)
+# velocity: 250 km/h = 69.4 m/s
+# pressure: atmospheric
+
+# 4. Run simulation
+simpleFoam > log.simpleFoam &
+
+# 5. Post-process
+foamToVTK  # Convert to VTK for ParaView
+```
+
+**Automation Script:**
+```python
+# generate_cfd_dataset.py
+import os
+import subprocess
+from pathlib import Path
+
+def run_openfoam_batch(geometries, velocities, yaw_angles):
+    """Generate CFD dataset for multiple configurations."""
+    results = []
+
+    for geom_id, geom_file in enumerate(geometries):
+        for vel in velocities:
+            for yaw in yaw_angles:
+                case_name = f"case_{geom_id}_v{vel}_yaw{yaw}"
+                case_dir = Path("cases") / case_name
+
+                # Setup case
+                setup_case(case_dir, geom_file, vel, yaw)
+
+                # Run simulation
+                subprocess.run(
+                    ["simpleFoam"],
+                    cwd=case_dir,
+                    stdout=open(case_dir / "log.txt", "w")
+                )
+
+                # Extract results
+                forces = extract_forces(case_dir)
+                pressure = extract_pressure_field(case_dir)
+
+                results.append({
+                    "geometry": geom_id,
+                    "velocity": vel,
+                    "yaw": yaw,
+                    "Cl": forces["lift_coefficient"],
+                    "Cd": forces["drag_coefficient"],
+                    "pressure_field": pressure
+                })
+
+    return results
+
+# Run batch
+velocities = [150, 180, 210, 240, 270, 300]  # km/h
+yaw_angles = [0, 2, 4, 6, 8, 10]  # degrees
+geometries = load_geometry_library("data/wings/")
+
+dataset = run_openfoam_batch(geometries, velocities, yaw_angles)
+save_dataset(dataset, "data/training_set.h5")
+```
+
+**Performance:**
+- **Computation Time:** 6-24 hours per case (F1 full car)
+- **Resolution:** 1-10M cells typical
+- **Accuracy:** ±2% vs. wind tunnel (validated)
+
+**Reference:** Quantum-Aero F1 Prototype COMPLEX TRANSIENT.md:193-201
+
+---
+
+##### SU2 (Stanford University Unstructured)
+
+**Description:** Open-source CFD/optimization suite optimized for aerodynamic design.
+
+**Use Cases:**
+- Shape optimization with adjoint methods
+- Compressible flow (high-speed scenarios)
+- Automated design sweeps
+
+**Key Capabilities:**
+- Automatic differentiation for gradients
+- Built-in optimization (gradient descent, genetic algorithms)
+- GPU acceleration support
+- Mesh adaptation
+
+**Installation:**
+```bash
+# Clone and build
+git clone https://github.com/su2code/SU2.git
+cd SU2
+./meson.py build --prefix=/usr/local -Denable-autodiff=true
+./ninja -C build install
+```
+
+**Example Configuration:**
+```cfg
+% SU2 Configuration: NACA 0012 Airfoil
+SOLVER= RANS
+KIND_TURB_MODEL= SST
+MACH_NUMBER= 0.2
+AOA= 5.0
+FREESTREAM_TEMPERATURE= 288.15
+REYNOLDS_NUMBER= 6.0E6
+
+MARKER_HEATFLUX= ( airfoil, 0.0 )
+MARKER_FAR= ( farfield )
+
+CONV_NUM_METHOD_FLOW= ROE
+MUSCL_FLOW= YES
+SLOPE_LIMITER_FLOW= VENKATAKRISHNAN
+
+ITER= 5000
+CONV_RESIDUAL_MINVAL= -12
+```
+
+**Optimization Example:**
+```python
+# su2_optimization.py
+import subprocess
+import numpy as np
+
+def run_su2_optimization(design_vars):
+    """
+    Optimize airfoil shape using SU2 adjoint solver.
+
+    Design variables: camber distribution (10 points)
+    Objective: Maximize L/D ratio
+    Constraints: Cl > 0.5, thickness > 0.12c
+    """
+    # Write design to FFD file
+    write_ffd_file(design_vars, "design.ffd")
+
+    # Run primal solution
+    subprocess.run(["SU2_CFD", "config.cfg"])
+
+    # Run adjoint for gradients
+    subprocess.run(["SU2_CFD_AD", "config.cfg"])
+
+    # Extract objective and gradients
+    obj = extract_objective("history.csv")
+    grad = extract_gradients("of_grad.dat")
+
+    return obj, grad
+
+# Gradient-based optimization
+from scipy.optimize import minimize
+
+x0 = np.zeros(10)  # Initial design
+result = minimize(
+    lambda x: -run_su2_optimization(x)[0],  # Maximize L/D
+    x0,
+    method='SLSQP',
+    jac=lambda x: -run_su2_optimization(x)[1],
+    options={'maxiter': 50}
+)
+
+print(f"Optimized L/D: {-result.fun}")
+```
+
+**Reference:** Genius_Evolution.md:110-127
+
+---
+
+##### PyFR (GPU-Accelerated High-Order CFD)
+
+**Description:** High-order CFD solver optimized for GPU execution (NVIDIA/AMD).
+
+**Use Cases:**
+- Massively parallel simulations
+- GPU cluster utilization
+- High-order accuracy (spectral methods)
+
+**Key Capabilities:**
+- GPU acceleration (CUDA, OpenCL, HIP)
+- High-order DG/FR schemes
+- Unstructured meshes
+- Explicit time integration
+
+**Installation:**
+```bash
+pip install pyfr
+# Requires: CUDA Toolkit, cuBLAS, cuFFT
+```
+
+**Performance:**
+- **Speedup:** 10-50x faster than CPU-based OpenFOAM
+- **GPU Utilization:** 90%+ on RTX 4090
+- **Scalability:** Near-linear scaling to 1000+ GPUs
+
+**Example:**
+```python
+# Run PyFR on GPU
+pyfr run -b cuda -p mesh.pyfrm config.ini
+```
+
+---
+
+#### Category 2: Low-Fidelity Fast Methods
+
+##### XFOIL (2D Airfoil Analysis)
+
+**Description:** Panel method + boundary layer solver for 2D airfoils.
+
+**Use Cases:**
+- Rapid airfoil analysis (seconds per case)
+- NACA airfoil database generation
+- Preliminary design screening
+
+**Key Capabilities:**
+- Inviscid panel method
+- Integral boundary layer equations
+- Transition prediction (eN method)
+- Polar generation (Cl vs. α)
+
+**Installation:**
+```bash
+sudo apt-get install xfoil
+```
+
+**Python Wrapper:**
+```python
+# xfoil_wrapper.py
+import subprocess
+import numpy as np
+
+def analyze_airfoil(coordinates, reynolds, alpha_range):
+    """
+    Run XFOIL analysis on airfoil coordinates.
+
+    Args:
+        coordinates: Nx2 array of (x, y) points
+        reynolds: Reynolds number
+        alpha_range: [alpha_min, alpha_max, alpha_step]
+
+    Returns:
+        Dict with Cl, Cd, Cm vs. alpha
+    """
+    # Write coordinates to file
+    np.savetxt("airfoil.dat", coordinates)
+
+    # Generate XFOIL input script
+    with open("xfoil_script.txt", "w") as f:
+        f.write(f"""
+LOAD airfoil.dat
+PANE
+OPER
+VISC {reynolds}
+PACC
+polar.txt
+
+ASEQ {alpha_range[0]} {alpha_range[1]} {alpha_range[2]}
+
+QUIT
+""")
+
+    # Run XFOIL
+    subprocess.run(["xfoil < xfoil_script.txt"], shell=True)
+
+    # Parse results
+    polar = np.loadtxt("polar.txt", skiprows=12)
+    return {
+        "alpha": polar[:, 0],
+        "Cl": polar[:, 1],
+        "Cd": polar[:, 2],
+        "Cm": polar[:, 4]
+    }
+
+# Example: NACA 4412
+coords = generate_naca_airfoil("4412", n_points=100)
+results = analyze_airfoil(coords, reynolds=6e6, alpha_range=[-5, 15, 0.5])
+
+import matplotlib.pyplot as plt
+plt.plot(results["alpha"], results["Cl"], label="Cl")
+plt.plot(results["alpha"], results["Cd"]*10, label="Cd × 10")
+plt.xlabel("Angle of Attack (deg)")
+plt.ylabel("Coefficient")
+plt.legend()
+plt.grid()
+plt.savefig("polar.png")
+```
+
+**Data Generation:**
+```python
+# generate_naca_dataset.py
+def generate_naca_dataset():
+    """Generate comprehensive NACA airfoil database."""
+    naca_codes = [
+        "0006", "0009", "0012", "0015", "0018",  # Symmetric
+        "2412", "2415", "4412", "4415", "6409",  # Cambered
+        "23012", "23015", "63-215", "64-210"     # Modern
+    ]
+
+    reynolds_numbers = [1e6, 3e6, 6e6, 9e6]
+
+    dataset = []
+    for naca in naca_codes:
+        coords = generate_naca_airfoil(naca)
+        for re in reynolds_numbers:
+            results = analyze_airfoil(coords, re, [-10, 20, 0.5])
+            dataset.append({
+                "naca": naca,
+                "reynolds": re,
+                "geometry": coords,
+                "polar": results
+            })
+
+    # Save as HDF5
+    import h5py
+    with h5py.File("naca_database.h5", "w") as f:
+        for i, data in enumerate(dataset):
+            grp = f.create_group(f"airfoil_{i}")
+            grp.attrs["naca"] = data["naca"]
+            grp.attrs["reynolds"] = data["reynolds"]
+            grp.create_dataset("geometry", data=data["geometry"])
+            grp.create_dataset("alpha", data=data["polar"]["alpha"])
+            grp.create_dataset("Cl", data=data["polar"]["Cl"])
+            grp.create_dataset("Cd", data=data["polar"]["Cd"])
+
+    print(f"Generated {len(dataset)} airfoil cases")
+    return dataset
+
+# Run generation
+dataset = generate_naca_dataset()
+```
+
+**Reference:** Quantum-Aero F1 Prototype TASKS.md:17
+
+---
+
+##### Vortex Lattice Method (VLM) - Custom Implementation
+
+**Description:** Potential flow method for 3D lifting surfaces.
+
+**Use Cases:**
+- Medium-fidelity validation (Phase 1.2)
+- Real-time optimization inner loop
+- Preliminary F1 wing analysis
+
+**Implementation:**
+```python
+# vlm_solver.py
+import numpy as np
+from scipy.linalg import solve
+
+class VLMSolver:
+    """
+    Vortex Lattice Method solver for lifting surfaces.
+
+    References:
+        - Anderson, Fundamentals of Aerodynamics (Ch. 4)
+        - Katz & Plotkin, Low-Speed Aerodynamics (Ch. 12)
+    """
+
+    def __init__(self, surface_mesh, n_panels_chord=20, n_panels_span=40):
+        self.mesh = surface_mesh
+        self.nc = n_panels_chord
+        self.ns = n_panels_span
+        self.panels = self._discretize_surface()
+
+    def solve(self, velocity, alpha, beta=0):
+        """
+        Solve for circulation distribution.
+
+        Args:
+            velocity: Freestream velocity [m/s]
+            alpha: Angle of attack [degrees]
+            beta: Sideslip angle [degrees]
+
+        Returns:
+            Dict with forces, moments, pressure distribution
+        """
+        # Freestream velocity vector
+        alpha_rad = np.radians(alpha)
+        beta_rad = np.radians(beta)
+
+        V_inf = velocity * np.array([
+            np.cos(alpha_rad) * np.cos(beta_rad),
+            np.sin(beta_rad),
+            np.sin(alpha_rad) * np.cos(beta_rad)
+        ])
+
+        # Build influence matrix A
+        A = self._compute_influence_matrix()
+
+        # Right-hand side: boundary condition (flow tangency)
+        b = self._compute_rhs(V_inf)
+
+        # Solve for vortex strengths
+        gamma = solve(A, b)
+
+        # Compute forces
+        forces = self._compute_forces(gamma, V_inf)
+
+        # Compute pressure distribution
+        cp = self._compute_pressure_coefficient(gamma, velocity)
+
+        return {
+            "lift": forces["L"],
+            "drag": forces["D"],
+            "moment": forces["M"],
+            "Cl": forces["Cl"],
+            "Cd": forces["Cd"],
+            "Cm": forces["Cm"],
+            "circulation": gamma,
+            "cp_distribution": cp
+        }
+
+    def _compute_influence_matrix(self):
+        """Compute induced velocity influence coefficients."""
+        n = len(self.panels)
+        A = np.zeros((n, n))
+
+        for i, panel_i in enumerate(self.panels):
+            for j, panel_j in enumerate(self.panels):
+                # Biot-Savart law for horseshoe vortex
+                v_ind = self._horseshoe_vortex_influence(
+                    panel_j.vortex_line,
+                    panel_i.control_point
+                )
+                # Normal component
+                A[i, j] = np.dot(v_ind, panel_i.normal)
+
+        return A
+
+    def _horseshoe_vortex_influence(self, vortex_line, point):
+        """Biot-Savart law for horseshoe vortex."""
+        # Implement Biot-Savart integration
+        # (simplified for brevity)
+        pass
+
+    def _compute_forces(self, gamma, V_inf):
+        """Kutta-Joukowski theorem for force calculation."""
+        rho = 1.225  # Air density [kg/m³]
+
+        # Integrate circulation × velocity
+        L = 0
+        D = 0
+        M = np.zeros(3)
+
+        for panel, g in zip(self.panels, gamma):
+            dL = rho * g * panel.area * np.linalg.norm(V_inf)
+            L += dL
+            # Induced drag from downwash (Trefftz plane)
+            # (simplified)
+
+        # Non-dimensionalize
+        q_inf = 0.5 * rho * np.linalg.norm(V_inf)**2
+        S_ref = self._reference_area()
+
+        Cl = L / (q_inf * S_ref)
+        Cd = D / (q_inf * S_ref)
+
+        return {"L": L, "D": D, "M": M, "Cl": Cl, "Cd": Cd, "Cm": 0}
+
+# Example usage
+wing_mesh = load_mesh("data/f1_wing.stl")
+vlm = VLMSolver(wing_mesh, n_panels_chord=20, n_panels_span=40)
+
+results = vlm.solve(velocity=250/3.6, alpha=5)  # 250 km/h, 5° AoA
+print(f"Cl = {results['Cl']:.3f}, Cd = {results['Cd']:.4f}")
+```
+
+**Performance:**
+- **Computation Time:** 1-10 seconds per case
+- **Accuracy:** ±10% vs. RANS for attached flow
+- **Use Case:** 1000s of evaluations for optimization
+
+**Reference:** Quantum-Aero F1 Prototype DESIGN.md:47-51
+
+---
+
+#### Category 3: ML-Based Synthetic Generation
+
+##### Generative Adversarial Networks (GANs) for Geometry
+
+**Description:** Neural networks that generate novel aerodynamic shapes.
+
+**Use Cases:**
+- Design space exploration
+- Discovering non-intuitive geometries
+- Augmenting limited training data
+
+**Architecture:**
+
+```python
+# aero_gan.py
+import torch
+import torch.nn as nn
+
+class AeroGAN:
+    """
+    GAN for generating F1 wing cross-sections.
+
+    Generator: latent vector (128D) → wing geometry (256 points)
+    Discriminator: wing geometry → real/fake probability
+    """
+
+    def __init__(self):
+        self.generator = Generator(latent_dim=128, output_dim=512)
+        self.discriminator = Discriminator(input_dim=512)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def train(self, real_geometries, epochs=1000):
+        """Train GAN on real F1 wing geometries."""
+        optimizer_G = torch.optim.Adam(self.generator.parameters(), lr=0.0002)
+        optimizer_D = torch.optim.Adam(self.discriminator.parameters(), lr=0.0002)
+
+        criterion = nn.BCELoss()
+
+        for epoch in range(epochs):
+            # Train Discriminator
+            real_data = real_geometries[torch.randint(0, len(real_geometries), (64,))]
+            real_labels = torch.ones(64, 1)
+
+            z = torch.randn(64, 128)  # Latent noise
+            fake_data = self.generator(z)
+            fake_labels = torch.zeros(64, 1)
+
+            loss_D_real = criterion(self.discriminator(real_data), real_labels)
+            loss_D_fake = criterion(self.discriminator(fake_data.detach()), fake_labels)
+            loss_D = loss_D_real + loss_D_fake
+
+            optimizer_D.zero_grad()
+            loss_D.backward()
+            optimizer_D.step()
+
+            # Train Generator
+            z = torch.randn(64, 128)
+            fake_data = self.generator(z)
+            loss_G = criterion(self.discriminator(fake_data), real_labels)
+
+            optimizer_G.zero_grad()
+            loss_G.backward()
+            optimizer_G.step()
+
+            if epoch % 100 == 0:
+                print(f"Epoch {epoch}: D loss = {loss_D:.4f}, G loss = {loss_G:.4f}")
+
+    def generate(self, n_samples=100):
+        """Generate novel wing geometries."""
+        z = torch.randn(n_samples, 128)
+        with torch.no_grad():
+            geometries = self.generator(z).cpu().numpy()
+        return geometries
+
+class Generator(nn.Module):
+    def __init__(self, latent_dim, output_dim):
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Linear(latent_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.Linear(512, output_dim),
+            nn.Tanh()  # Output in [-1, 1]
+        )
+
+    def forward(self, z):
+        return self.model(z)
+
+class Discriminator(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, 512),
+            nn.LeakyReLU(0.2),
+            nn.Linear(512, 256),
+            nn.LeakyReLU(0.2),
+            nn.Linear(256, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+# Usage
+gan = AeroGAN()
+real_wings = load_f1_wing_database("data/wings/")
+gan.train(real_wings, epochs=5000)
+
+# Generate 1000 novel designs
+synthetic_wings = gan.generate(n_samples=1000)
+save_geometries(synthetic_wings, "data/synthetic_wings.h5")
+```
+
+**Reference:** Genius_Evolution.md:68-79
+
+---
+
+##### Physics-Informed Neural Networks (PINNs)
+
+**Description:** Neural networks that enforce physical laws (Navier-Stokes) as soft constraints.
+
+**Use Cases:**
+- Generate flow fields satisfying conservation laws
+- Interpolate between sparse CFD simulations
+- Reconstruct full fields from sensor data
+
+**Implementation:**
+
+```python
+# pinn_flow_generator.py
+import torch
+import torch.nn as nn
+
+class FlowFieldPINN(nn.Module):
+    """
+    Physics-Informed Neural Network for flow field generation.
+
+    Input: (x, y, z) spatial coordinates
+    Output: (u, v, w, p) velocity components and pressure
+
+    Loss = Data loss + Physics loss (Navier-Stokes residual)
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Linear(3, 128),
+            nn.Tanh(),
+            nn.Linear(128, 128),
+            nn.Tanh(),
+            nn.Linear(128, 128),
+            nn.Tanh(),
+            nn.Linear(128, 4)  # u, v, w, p
+        )
+
+    def forward(self, coords):
+        """Predict flow field at given coordinates."""
+        return self.network(coords)
+
+    def physics_loss(self, coords):
+        """Compute Navier-Stokes residual."""
+        coords.requires_grad_(True)
+
+        # Forward pass
+        flow = self.forward(coords)
+        u, v, w, p = flow[:, 0], flow[:, 1], flow[:, 2], flow[:, 3]
+
+        # Compute gradients
+        grad_u = torch.autograd.grad(u, coords, torch.ones_like(u), create_graph=True)[0]
+        grad_v = torch.autograd.grad(v, coords, torch.ones_like(v), create_graph=True)[0]
+        grad_w = torch.autograd.grad(w, coords, torch.ones_like(w), create_graph=True)[0]
+        grad_p = torch.autograd.grad(p, coords, torch.ones_like(p), create_graph=True)[0]
+
+        # Continuity equation: ∇·v = 0
+        continuity = grad_u[:, 0] + grad_v[:, 1] + grad_w[:, 2]
+
+        # Momentum equation (simplified, inviscid)
+        # ρ(v·∇)v + ∇p = 0
+        momentum_x = (u * grad_u[:, 0] + v * grad_u[:, 1] + w * grad_u[:, 2]) + grad_p[:, 0]
+        momentum_y = (u * grad_v[:, 0] + v * grad_v[:, 1] + w * grad_v[:, 2]) + grad_p[:, 1]
+        momentum_z = (u * grad_w[:, 0] + v * grad_w[:, 1] + w * grad_w[:, 2]) + grad_p[:, 2]
+
+        # Total physics loss
+        loss = torch.mean(continuity**2 + momentum_x**2 + momentum_y**2 + momentum_z**2)
+        return loss
+
+    def train_pinn(self, sparse_cfd_data, epochs=10000):
+        """Train PINN on sparse CFD simulations."""
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
+
+        for epoch in range(epochs):
+            # Data loss (match sparse CFD points)
+            coords_data = sparse_cfd_data["coords"]
+            flow_data = sparse_cfd_data["flow"]
+
+            flow_pred = self.forward(coords_data)
+            loss_data = torch.mean((flow_pred - flow_data)**2)
+
+            # Physics loss (enforce PDE everywhere)
+            coords_physics = torch.rand(1000, 3) * 10  # Random points in domain
+            loss_physics = self.physics_loss(coords_physics)
+
+            # Total loss
+            loss = loss_data + 0.01 * loss_physics
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            if epoch % 1000 == 0:
+                print(f"Epoch {epoch}: Data loss = {loss_data:.6f}, Physics loss = {loss_physics:.6f}")
+
+# Usage
+pinn = FlowFieldPINN()
+
+# Load sparse CFD data (e.g., 100 simulations with 10K points each)
+sparse_data = load_sparse_cfd("data/sparse_cfd.h5")
+
+# Train PINN
+pinn.train_pinn(sparse_data, epochs=10000)
+
+# Generate dense flow field (1M points)
+dense_coords = generate_dense_mesh(n_points=1000000)
+dense_flow = pinn(dense_coords)
+
+save_flow_field(dense_coords, dense_flow, "data/dense_flow_field.h5")
+```
+
+**Reference:** Genius_Evolution.md:58-66
+
+---
+
+### Real Data Sources
+
+#### NASA Databases
+
+##### 1. NASA Turbulence Modeling Resource
+
+**URL:** https://turbmodels.larc.nasa.gov/
+
+**Content:**
+- Validation cases for turbulence models
+- 2D and 3D flow benchmarks
+- Experimental data for comparison
+
+**Key Datasets:**
+- NACA 0012 airfoil (subsonic/transonic)
+- RAE 2822 airfoil (transonic)
+- NASA Trap Wing (high-lift configuration)
+- NASA Juncture Flow Model
+
+**Download Example:**
+```bash
+# Download NACA 0012 validation case
+wget https://turbmodels.larc.nasa.gov/NACA0012_val/n0012_val.tar.gz
+tar -xzf n0012_val.tar.gz
+
+# Contains:
+# - Experimental Cp data
+# - Grid files (PLOT3D format)
+# - Reference solutions
+```
+
+---
+
+##### 2. NASA CFD Vision 2030 Database
+
+**URL:** https://www.nas.nasa.gov/publications/software/docs/cfdvision2030/
+
+**Content:**
+- High-fidelity LES/DNS data
+- Complex configurations
+- Validation datasets for ML
+
+**Key Datasets:**
+- High-lift configuration (HL-CRM)
+- Swept wing in crossflow
+- Jet-in-crossflow
+
+---
+
+##### 3. NASA Airfoil Database
+
+**URL:** https://www.grc.nasa.gov/WWW/K-12/airplane/airfoil.html
+
+**Content:**
+- Historical NACA airfoil data
+- Pressure distributions
+- Lift/drag polars
+
+**Downloadable Formats:**
+- Text files (.txt)
+- Excel spreadsheets (.xls)
+
+---
+
+#### UIUC Airfoil Database
+
+**URL:** https://m-selig.ae.illinois.edu/ads/coord_database.html
+
+**Content:**
+- 1,600+ airfoil coordinate files
+- NACA, NASA, modern airfoils
+- Public domain
+
+**Download Script:**
+```python
+# download_uiuc_airfoils.py
+import requests
+from bs4 import BeautifulSoup
+import os
+
+def download_uiuc_database():
+    """Download entire UIUC airfoil coordinate database."""
+    base_url = "https://m-selig.ae.illinois.edu/ads/"
+    coord_url = base_url + "coord_database.html"
+
+    # Parse index page
+    response = requests.get(coord_url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    # Find all airfoil links
+    links = soup.find_all('a', href=lambda x: x and x.endswith('.dat'))
+
+    os.makedirs("data/uiuc_airfoils", exist_ok=True)
+
+    for link in links:
+        filename = link['href']
+        airfoil_name = filename.replace('.dat', '')
+
+        # Download coordinate file
+        dat_url = base_url + filename
+        dat_response = requests.get(dat_url)
+
+        # Save to file
+        with open(f"data/uiuc_airfoils/{filename}", "w") as f:
+            f.write(dat_response.text)
+
+        print(f"Downloaded: {airfoil_name}")
+
+    print(f"Total airfoils downloaded: {len(links)}")
+
+# Run download
+download_uiuc_database()
+```
+
+---
+
+#### OpenFOAM Tutorial Cases
+
+**Location:** `$FOAM_TUTORIALS` (after OpenFOAM installation)
+
+**Key Cases:**
+- `incompressible/simpleFoam/airFoil2D` - 2D airfoil
+- `incompressible/pimpleFoam/wingMotion` - Pitching wing
+- `incompressible/simpleFoam/motorBike` - Complex geometry
+
+**Export to Dataset:**
+```python
+# export_openfoam_tutorials.py
+import os
+import subprocess
+from pathlib import Path
+
+def export_tutorial_to_hdf5(tutorial_path):
+    """Convert OpenFOAM tutorial results to HDF5."""
+    # Run case if not already run
+    if not (tutorial_path / "postProcessing").exists():
+        subprocess.run(["./Allrun"], cwd=tutorial_path)
+
+    # Convert to VTK
+    subprocess.run(["foamToVTK"], cwd=tutorial_path)
+
+    # Parse VTK files to HDF5
+    vtk_dir = tutorial_path / "VTK"
+    # (VTK parsing code here)
+
+# Export all airfoil cases
+foam_tutorials = Path(os.environ["FOAM_TUTORIALS"])
+airfoil_cases = foam_tutorials.glob("**/airFoil*")
+
+for case in airfoil_cases:
+    export_tutorial_to_hdf5(case)
+```
+
+---
+
+#### F1 Technical Databases
+
+##### F1 Technical Analysis Archive
+
+**URL:** https://www.f1technical.net/
+
+**Content:**
+- Historical F1 car specifications
+- Aerodynamic development articles
+- Wing geometry photos (for reference)
+
+**Note:** Most F1 CAD data is proprietary. Use simplified/parameterized models.
+
+---
+
+##### Simplified F1 Models
+
+**Open-Source Repositories:**
+
+```bash
+# Clone F1 open-source models
+git clone https://github.com/Formula-One-CAD/F1-2022-Models.git
+
+# Contains:
+# - Simplified wing geometries (STL)
+# - Floor models
+# - Diffuser shapes
+```
+
+---
+
+### Visualization Tools
+
+#### Category 1: Open-Source Scientific Visualization
+
+##### ParaView (Recommended)
+
+**Description:** Industry-standard open-source visualization for CFD/FEA.
+
+**Installation:**
+```bash
+# Ubuntu
+sudo apt-get install paraview
+
+# Or download from: https://www.paraview.org/download/
+```
+
+**Key Features:**
+- **Volume Rendering:** Visualize 3D scalar fields (pressure, vorticity)
+- **Streamlines:** Trace particle paths through flow field
+- **Isosurfaces:** Render surfaces of constant value (Q-criterion for vortices)
+- **Glyphs:** Vector field visualization (velocity arrows)
+- **Animation:** Time-series playback for transient simulations
+- **Python Scripting:** Automate visualization workflows
+
+**Example Workflow:**
+```python
+# paraview_automation.py
+from paraview.simple import *
+
+# Load VTK file
+reader = OpenDataFile("cases/wing_case/VTK/wing_case.vtk")
+
+# Create slice through center plane
+slice = Slice(Input=reader)
+slice.SliceType = 'Plane'
+slice.SliceType.Origin = [0, 0, 0]
+slice.SliceType.Normal = [0, 1, 0]  # Y-normal (spanwise slice)
+
+# Color by pressure
+pressureDisplay = Show(slice)
+pressureDisplay.Representation = 'Surface'
+pressureDisplay.ColorArrayName = ['POINTS', 'p']
+
+# Set colormap
+pressureLUT = GetColorTransferFunction('p')
+pressureLUT.ApplyPreset('Cool to Warm', True)
+
+# Add streamlines
+streamTracer = StreamTracer(Input=reader)
+streamTracer.SeedType = 'Point Cloud'
+streamTracer.SeedType.NumberOfPoints = 100
+
+# Render and save
+renderView = GetActiveView()
+renderView.ViewSize = [1920, 1080]
+renderView.CameraPosition = [10, 5, 10]
+renderView.CameraFocalPoint = [0, 0, 0]
+
+SaveScreenshot('pressure_slice.png', renderView)
+
+# Create animation
+animationScene = GetAnimationScene()
+animationScene.NumberOfFrames = 100
+SaveAnimation('flow_animation.avi', renderView)
+```
+
+**Transient Flow Animation:**
+```python
+# animate_transient_flow.py
+from paraview.simple import *
+
+# Load time-series data
+reader = OpenDataFile("cases/drs_activation/VTK/drs_*.vtk")
+
+# Vorticity isosurface (Q-criterion)
+calculator = Calculator(Input=reader)
+calculator.Function = 'mag(vorticity)'
+
+contour = Contour(Input=calculator)
+contour.ContourBy = ['POINTS', 'Result']
+contour.Isosurfaces = [100, 200, 300]  # Vorticity levels
+
+# Color by velocity magnitude
+contourDisplay = Show(contour)
+contourDisplay.ColorArrayName = ['POINTS', 'U']
+
+# Animate through time steps
+animationScene = GetAnimationScene()
+animationScene.PlayMode = 'Sequence'
+animationScene.NumberOfFrames = 200
+
+# Save as MP4
+SaveAnimation('drs_vorticity.mp4', renderView, FrameRate=30)
+```
+
+**Reference:** Quantum-Aero F1 Prototype TASKS.md:106
+
+---
+
+##### PyVista (Python 3D Visualization)
+
+**Description:** Python-friendly 3D visualization library built on VTK.
+
+**Installation:**
+```bash
+pip install pyvista[all]
+```
+
+**Advantages:**
+- Pythonic API (easier than ParaView scripting)
+- Jupyter notebook integration
+- GPU-accelerated rendering
+
+**Example:**
+```python
+# pyvista_visualization.py
+import pyvista as pv
+import numpy as np
+
+# Load mesh and flow field
+mesh = pv.read("wing.vtk")
+
+# Plot pressure on surface
+plotter = pv.Plotter()
+plotter.add_mesh(
+    mesh,
+    scalars="pressure",
+    cmap="coolwarm",
+    show_edges=False,
+    lighting=True
+)
+plotter.add_scalar_bar(title="Pressure [Pa]")
+plotter.show()
+
+# Streamlines
+streamlines = mesh.streamlines(
+    vectors="velocity",
+    source_center=(0, 0, 0),
+    source_radius=1.0,
+    n_points=50
+)
+
+plotter = pv.Plotter()
+plotter.add_mesh(mesh, opacity=0.3, color="lightgray")
+plotter.add_mesh(streamlines, color="velocity", line_width=3)
+plotter.show()
+
+# Interactive widget in Jupyter
+# mesh.plot(jupyter_backend='trame', scalars='pressure')
+```
+
+**Web-Based Visualization:**
+```python
+# Export for web viewing
+mesh.save("wing_pressure.html")  # Interactive HTML file
+```
+
+---
+
+##### VisIt (DOE Visualization Tool)
+
+**Description:** High-performance visualization for extreme-scale data.
+
+**Use Cases:**
+- Massive datasets (>1B cells)
+- Parallel visualization (MPI)
+- Remote rendering on HPC
+
+**Installation:**
+```bash
+# Download from: https://visit-dav.github.io/visit-website/
+```
+
+---
+
+#### Category 2: Commercial Visualization
+
+##### Tecplot 360
+
+**Description:** Industry-standard commercial CFD visualization.
+
+**Advantages:**
+- Best-in-class streamline quality
+- XY plotting for quantitative analysis
+- Layout templates for reports
+
+**Cost:** $3,000-$10,000/year (academic discounts available)
+
+**Note:** For academic/non-commercial use only in this project.
+
+---
+
+#### Category 3: Web-Based Interactive Visualization
+
+##### Three.js + VTK.js (Project Integration)
+
+**Already Integrated** in frontend (Phase 5.2)
+
+**Capabilities:**
+- WebGL rendering in browser
+- Interactive camera controls
+- Real-time pressure colormap updates
+
+**Reference:** Quantum-Aero F1 Prototype DESIGN.md:26-30, TASKS.md:104-107
+
+---
+
+##### Plotly Dash (Interactive Dashboards)
+
+**Description:** Web-based plotting library for interactive dashboards.
+
+**Installation:**
+```bash
+pip install plotly dash
+```
+
+**Example Dashboard:**
+```python
+# dash_aero_dashboard.py
+import dash
+from dash import dcc, html
+import plotly.graph_objects as go
+import numpy as np
+
+app = dash.Dash(__name__)
+
+# Load aerodynamic data
+data = load_simulation_results()
+
+# Create 3D surface plot
+fig = go.Figure(data=[go.Surface(
+    x=data["x"],
+    y=data["y"],
+    z=data["pressure"],
+    colorscale="RdBu",
+    colorbar=dict(title="Pressure [Pa]")
+)])
+
+fig.update_layout(
+    title="F1 Wing Pressure Distribution",
+    scene=dict(
+        xaxis_title="Chordwise [m]",
+        yaxis_title="Spanwise [m]",
+        zaxis_title="Pressure [Pa]"
+    )
+)
+
+app.layout = html.Div([
+    html.H1("Aerodynamic Analysis Dashboard"),
+    dcc.Graph(figure=fig),
+    dcc.Slider(
+        id='alpha-slider',
+        min=0, max=15, step=0.5, value=5,
+        marks={i: f'{i}°' for i in range(0, 16, 3)}
+    )
+])
+
+if __name__ == '__main__':
+    app.run_server(debug=True, port=8050)
+```
+
+---
+
+### Dynamic Flow Visualization Techniques
+
+#### Technique 1: Streamlines (Steady Flow)
+
+**Definition:** Lines tangent to velocity field at every point.
+
+**Use Cases:**
+- Visualize flow direction
+- Identify separation points
+- Trace wake patterns
+
+**Implementation (ParaView):**
+```python
+streamTracer = StreamTracer(Input=mesh)
+streamTracer.SeedType = 'Line'
+streamTracer.SeedType.Point1 = [-2, 0, 0]  # Upstream
+streamTracer.SeedType.Point2 = [-2, 2, 0]  # Span
+streamTracer.SeedType.Resolution = 50
+
+Show(streamTracer)
+```
+
+---
+
+#### Technique 2: Vortex Identification (Q-Criterion)
+
+**Definition:** Isosurfaces of $Q = \frac{1}{2}(\|\boldsymbol{\Omega}\|^2 - \|\mathbf{S}\|^2) > 0$
+
+Where:
+- $\boldsymbol{\Omega}$ = Vorticity tensor (rotation)
+- $\mathbf{S}$ = Strain rate tensor (deformation)
+
+**Use Cases:**
+- Identify vortex cores
+- Wing tip vortices
+- Floor edge vortices
+
+**Implementation:**
+```python
+# Q-criterion calculation
+calculator = Calculator(Input=mesh)
+calculator.Function = '0.5 * (mag(vorticity)^2 - mag(strain)^2)'
+
+contour = Contour(Input=calculator)
+contour.Isosurfaces = [1000]  # Q > 1000
+```
+
+---
+
+#### Technique 3: Pathlines (Transient Flow)
+
+**Definition:** Trajectories of individual fluid particles over time.
+
+**Use Cases:**
+- DRS activation transient
+- Corner exit flow evolution
+- Particle tracing
+
+**Implementation:**
+```python
+particleTracer = ParticleTracer(Input=timeSeries)
+particleTracer.SeedType = 'Point Cloud'
+particleTracer.SeedType.NumberOfPoints = 1000
+
+# Animate particle motion
+animationScene.Play()
+```
+
+---
+
+#### Technique 4: Volume Rendering
+
+**Definition:** Direct rendering of 3D scalar fields with opacity transfer function.
+
+**Use Cases:**
+- Visualize pressure gradients
+- Vorticity magnitude clouds
+- Turbulent kinetic energy
+
+**Implementation:**
+```python
+volumeRepresentation = GetDisplayProperties(mesh)
+volumeRepresentation.Representation = 'Volume'
+volumeRepresentation.ScalarOpacityFunction = pressureOpacity
+```
+
+---
+
+### Integration into Q-Aero Project
+
+#### Phase 1: Data Generation Pipeline (Weeks 1-3)
+
+**Week 1: NACA Database Generation**
+
+```bash
+# Task 1.2.1: Generate NACA airfoil database with XFOIL
+python scripts/generate_naca_dataset.py --n_airfoils=20 --reynolds=[1e6,3e6,6e6] --output=data/naca_database.h5
+
+# Expected output: 20 airfoils × 3 Reynolds × 50 alpha = 3,000 data points
+# Time: ~2 hours
+```
+
+**Week 2: OpenFOAM Baseline Simulations**
+
+```bash
+# Task 1.2.2: Run OpenFOAM on 100 wing configurations
+python scripts/run_openfoam_batch.py --geometries=data/wing_library/ --n_cases=100
+
+# Expected output: 100 CFD cases × 10 hours = 1,000 CPU-hours
+# Parallel execution: 10 CPUs → 100 hours wall time (4 days)
+```
+
+**Week 3: VLM Medium-Fidelity Dataset**
+
+```bash
+# Task 1.2.3: Generate 10,000 VLM evaluations for surrogate training
+python scripts/generate_vlm_dataset.py --n_samples=10000 --output=data/vlm_training.h5
+
+# Expected output: 10,000 cases × 5 seconds = 14 hours
+```
+
+---
+
+#### Phase 3: ML Training Data (Weeks 7-10)
+
+**Week 7-8: Augmented Dataset**
+
+```python
+# Use GANs to generate 1,000 synthetic geometries
+python scripts/train_geometry_gan.py --real_data=data/wing_library/ --epochs=5000
+python scripts/generate_synthetic_wings.py --n_samples=1000 --output=data/synthetic_wings/
+
+# Run CFD on synthetic designs
+python scripts/run_openfoam_batch.py --geometries=data/synthetic_wings/ --n_cases=1000
+```
+
+**Deliverable:**
+- 1,100 total CFD simulations (100 real + 1,000 synthetic)
+- 10,000 VLM evaluations
+- 3,000 NACA airfoil data points
+
+---
+
+#### Phase 5: Frontend Visualization (Weeks 16-17)
+
+**Integration with Three.js/VTK.js:**
+
+```javascript
+// frontend/components/FlowVisualizer.jsx
+import { VTKViewer } from '@kitware/vtk.js';
+import { useEffect } from 'react';
+
+export default function FlowVisualizer({ resultId }) {
+  useEffect(() => {
+    // Fetch VTK data from backend
+    fetch(`/api/v1/results/${resultId}/vtk`)
+      .then(res => res.blob())
+      .then(blob => {
+        // Render with VTK.js
+        const reader = vtkXMLPolyDataReader.newInstance();
+        reader.parseAsArrayBuffer(blob);
+
+        const mapper = vtkMapper.newInstance();
+        mapper.setInputConnection(reader.getOutputPort());
+
+        const actor = vtkActor.newInstance();
+        actor.setMapper(mapper);
+
+        // Add to scene
+        renderer.addActor(actor);
+        renderWindow.render();
+      });
+  }, [resultId]);
+
+  return <div id="vtk-container" style={{ width: '100%', height: '600px' }} />;
+}
+```
+
+---
+
+### Data Storage Strategy
+
+#### HDF5 Format (Recommended)
+
+**Structure:**
+```
+aerodynamic_dataset.h5
+├── /geometries
+│   ├── wing_001
+│   │   ├── vertices [N, 3]
+│   │   ├── faces [M, 3]
+│   │   └── metadata (attrs: name, type, date)
+│   ├── wing_002
+│   └── ...
+├── /simulations
+│   ├── sim_001
+│   │   ├── /fields
+│   │   │   ├── pressure [N]
+│   │   │   ├── velocity [N, 3]
+│   │   │   └── vorticity [N, 3]
+│   │   ├── /forces
+│   │   │   ├── Cl
+│   │   │   ├── Cd
+│   │   │   └── L_D
+│   │   └── /parameters (attrs: velocity, alpha, yaw)
+│   ├── sim_002
+│   └── ...
+└── /metadata
+    └── dataset_info (attrs: version, date, n_cases)
+```
+
+**Loading Example:**
+```python
+import h5py
+import numpy as np
+
+with h5py.File("aerodynamic_dataset.h5", "r") as f:
+    # Load geometry
+    vertices = f["/geometries/wing_001/vertices"][:]
+
+    # Load simulation results
+    pressure = f["/simulations/sim_001/fields/pressure"][:]
+    Cl = f["/simulations/sim_001/forces"].attrs["Cl"]
+
+    # Load metadata
+    velocity = f["/simulations/sim_001/parameters"].attrs["velocity"]
+```
+
+---
+
+### Budget & Resource Requirements
+
+| Resource | Quantity | Cost | Purpose |
+|----------|----------|------|---------|
+| **GPU (RTX 4090)** | 1 | $1,500 | ML training, PyFR |
+| **CPU Server (32 cores)** | 1 | $2,000 | OpenFOAM parallel |
+| **Storage (2TB SSD)** | 1 | $200 | Dataset storage |
+| **Cloud GPU (AWS p3.2xlarge)** | 100 hours | $300 | Overflow CFD |
+| **ParaView License** | - | Free | Visualization |
+| **XFOIL** | - | Free | Airfoil analysis |
+| **OpenFOAM** | - | Free | CFD simulations |
+| **Total** | - | **$4,000** | One-time hardware |
+
+---
+
+### Summary & Recommendations
+
+**Recommended Workflow:**
+
+1. **Weeks 1-3 (Phase 1):**
+   - Generate NACA database with XFOIL (3K data points)
+   - Run 100 OpenFOAM baseline cases
+   - Generate 10K VLM evaluations
+
+2. **Weeks 7-10 (Phase 3):**
+   - Train GAN on real geometries
+   - Generate 1K synthetic designs
+   - Run CFD on synthetic cases
+   - Train ML surrogate on combined dataset
+
+3. **Weeks 16-17 (Phase 5):**
+   - Integrate ParaView/PyVista for offline analysis
+   - Implement Three.js/VTK.js for web visualization
+   - Create interactive dashboards with Plotly Dash
+
+**Key Takeaways:**
+- **OpenFOAM** = High-fidelity validation (100s of cases)
+- **VLM** = Medium-fidelity (1,000s of cases)
+- **ML Surrogate** = Low-fidelity (millions of evaluations)
+- **ParaView** = Primary visualization tool (open-source, powerful)
+- **UIUC + NASA** = Real data sources (1,600+ airfoils, validated CFD)
+
+---
+
+## Local Development Setup (RTX 4070 Proof of Concept)
+
+### Overview
+
+This section provides **complete configuration** for running the Quantum-Aero prototype on a personal computer with **NVIDIA GeForce RTX 4070** GPU. This is the **proof-of-concept environment** before production deployment.
+
+**Target Hardware:**
+- GPU: NVIDIA GeForce RTX 4070 (12GB VRAM)
+- CPU: Intel i7/i9 or AMD Ryzen 7/9 (8+ cores recommended)
+- RAM: 32GB minimum, 64GB recommended
+- Storage: 1TB NVMe SSD (for datasets and models)
+- OS: Ubuntu 22.04 LTS or Windows 11 with WSL2
+
+---
+
+### RTX 4070 Specifications & Performance Expectations
+
+#### Hardware Specifications
+
+| Specification | RTX 4070 | Notes |
+|---------------|----------|-------|
+| **CUDA Cores** | 5,888 | ~70% of RTX 4090 |
+| **Tensor Cores** | 184 (4th Gen) | FP16/FP8 acceleration |
+| **VRAM** | 12GB GDDR6X | Sufficient for most models |
+| **Memory Bandwidth** | 504 GB/s | High-speed access |
+| **TDP** | 200W | Power-efficient |
+| **CUDA Compute** | 8.9 | Latest architecture |
+| **PCIe** | 4.0 x16 | High bandwidth |
+
+#### Performance Expectations
+
+**ML Inference (ONNX Runtime GPU):**
+- **Surrogate Model:** 50-80ms per inference (target: <100ms ✓)
+- **Batch Size:** 8-16 meshes simultaneously
+- **Throughput:** 12-20 inferences/second
+- **VRAM Usage:** 6-8GB for typical model
+
+**ML Training (PyTorch CUDA):**
+- **Training Time:** ~8-12 hours for baseline model (vs. 6 hours on RTX 4090)
+- **Batch Size:** 12-16 (vs. 20-24 on RTX 4090)
+- **Mixed Precision (FP16):** 1.8x speedup over FP32
+- **Epochs:** 100 epochs in ~10 hours
+
+**CFD/Physics (PyFR GPU):**
+- **Speedup:** 15-25x vs. CPU (vs. 30-40x on RTX 4090)
+- **Mesh Size:** Up to 2M cells (vs. 5M on RTX 4090)
+- **Stable & Sufficient:** ✓ for proof-of-concept
+
+**Quantum Simulation (Qiskit Aer):**
+- **Qubits:** CPU-bound, GPU not utilized
+- **No GPU bottleneck:** ✓
+
+**Conclusion:** RTX 4070 is **excellent** for proof-of-concept. All performance targets achievable.
+
+---
+
+### System Prerequisites
+
+#### 1. NVIDIA Driver Installation
+
+**Ubuntu 22.04:**
+
+```bash
+# Check current GPU
+lspci | grep -i nvidia
+
+# Remove old drivers (if any)
+sudo apt-get purge nvidia* -y
+sudo apt-get autoremove -y
+
+# Add NVIDIA PPA
+sudo add-apt-repository ppa:graphics-drivers/ppa -y
+sudo apt-get update
+
+# Install latest driver (545+ for RTX 4070)
+sudo ubuntu-drivers devices  # Check recommended
+sudo apt-get install nvidia-driver-545 -y
+
+# Reboot
+sudo reboot
+
+# Verify installation
+nvidia-smi
+```
+
+**Expected Output:**
+```
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 545.xx                 Driver Version: 545.xx         CUDA Version: 12.3     |
+|---------|----------------------|----------------------|----------------------------|
+| GPU  Name                 TCC/WDDM | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+|===============================+======================+============================|
+|   0  NVIDIA GeForce RTX 4070      | 00000000:01:00.0  On |                  N/A |
+|---------|----------------------|----------------------|----------------------------|
+```
+
+**Windows 11 + WSL2:**
+
+```powershell
+# Download from NVIDIA website
+# https://www.nvidia.com/Download/index.aspx
+
+# Install WSL2 with Ubuntu
+wsl --install -d Ubuntu-22.04
+
+# Install CUDA in WSL2
+wsl
+sudo apt-get update
+sudo apt-get install -y nvidia-cuda-toolkit
+```
+
+---
+
+#### 2. CUDA Toolkit Installation
+
+```bash
+# Ubuntu 22.04
+wget https://developer.download.nvidia.com/compute/cuda/12.3.0/local_installers/cuda_12.3.0_545.23.06_linux.run
+sudo sh cuda_12.3.0_545.23.06_linux.run --silent --toolkit
+
+# Add to PATH
+echo 'export PATH=/usr/local/cuda-12.3/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.3/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+
+# Verify
+nvcc --version
+```
+
+**Expected Output:**
+```
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2023 NVIDIA Corporation
+Built on Mon_Sep_11_22:00:00_PDT_2023
+Cuda compilation tools, release 12.3, V12.3.0
+```
+
+---
+
+#### 3. Docker with GPU Support
+
+**Install Docker:**
+
+```bash
+# Remove old versions
+sudo apt-get remove docker docker-engine docker.io containerd runc
+
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+# Add user to docker group
+sudo usermod -aG docker $USER
+newgrp docker
+
+# Verify
+docker --version
+```
+
+**Install NVIDIA Container Toolkit:**
+
+```bash
+# Add NVIDIA Docker repository
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+# Install
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+
+# Configure Docker
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+
+# Test GPU access in Docker
+docker run --rm --gpus all nvidia/cuda:12.3.0-base-ubuntu22.04 nvidia-smi
+```
+
+**Expected Output:** Same `nvidia-smi` output as host.
+
+---
+
+#### 4. Development Environment
+
+**Python 3.11 with CUDA:**
+
+```bash
+# Install Python 3.11
+sudo apt-get install -y python3.11 python3.11-venv python3.11-dev
+
+# Create virtual environment
+python3.11 -m venv ~/qaero-env
+source ~/qaero-env/bin/activate
+
+# Install PyTorch with CUDA 12.1 support
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Verify GPU access
+python -c "import torch; print(f'CUDA Available: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0)}')"
+```
+
+**Expected Output:**
+```
+CUDA Available: True
+GPU: NVIDIA GeForce RTX 4070
+```
+
+**Node.js 20:**
+
+```bash
+# Install Node.js 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Verify
+node --version  # v20.x.x
+npm --version   # 10.x.x
+```
+
+---
+
+### Resource Allocation for RTX 4070
+
+#### GPU Memory Management
+
+**Total VRAM:** 12GB
+
+**Allocation Strategy:**
+
+| Component | VRAM Allocation | Usage |
+|-----------|----------------|-------|
+| **ML Inference Service** | 6-7GB | ONNX model + batch processing |
+| **ML Training** | 10-11GB | During training only (exclusive) |
+| **System Reserve** | 1-2GB | Display, OS, buffers |
+| **PyFR (Optional)** | 8-10GB | If running CFD on GPU |
+
+**Configuration:**
+
+```python
+# services/ml_inference/config.py
+import torch
+
+# RTX 4070 specific settings
+GPU_CONFIG = {
+    "device": "cuda:0",
+    "max_batch_size": 12,  # Conservative for 12GB VRAM
+    "fp16_mode": True,     # Use mixed precision
+    "memory_fraction": 0.9, # Use 90% of available VRAM
+}
+
+# Set memory fraction
+torch.cuda.set_per_process_memory_fraction(0.9, device=0)
+
+# Enable TF32 for faster matmul on Tensor Cores
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+```
+
+---
+
+#### CPU & RAM Allocation
+
+**Docker Resource Limits:**
+
+```yaml
+# docker-compose.yml (RTX 4070 optimized)
+services:
+  ml-service:
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'      # 4 cores for ML service
+          memory: 16G      # 16GB RAM
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+          memory: 8G
+
+  physics-service:
+    deploy:
+      resources:
+        limits:
+          cpus: '8.0'      # 8 cores for physics (no GPU)
+          memory: 16G
+
+  quantum-service:
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+
+  backend:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+
+  frontend:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  mongodb:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+```
+
+**Total:** 23 cores, 52GB RAM (fits 32GB with swapping, ideal with 64GB)
+
+---
+
+### Local Development Workflow
+
+#### 1. Clone Repository
+
+```bash
+# Clone project
+git clone https://github.com/your-org/quantum-aero.git
+cd quantum-aero
+
+# Verify directory structure
+tree -L 2
+```
+
+**Expected Structure:**
+```
+quantum-aero/
+├── services/
+│   ├── ml_inference/
+│   ├── physics/
+│   ├── quantum/
+│   └── fsi/
+├── backend/
+├── frontend/
+├── scripts/
+├── data/
+├── models/
+├── docker-compose.yml
+├── docker-compose.dev.yml
+└── README.md
+```
+
+---
+
+#### 2. Environment Configuration
+
+**Create `.env` file:**
+
+```bash
+# .env.local (for RTX 4070 development)
+# Copy to .env
+NODE_ENV=development
+LOG_LEVEL=debug
+
+# GPU Configuration
+CUDA_VISIBLE_DEVICES=0
+GPU_MEMORY_FRACTION=0.9
+ENABLE_FP16=true
+BATCH_SIZE=12
+
+# Ports
+ML_SERVICE_PORT=8000
+PHYSICS_SERVICE_PORT=8001
+QUANTUM_SERVICE_PORT=8002
+FSI_SERVICE_PORT=8003
+BACKEND_PORT=4000
+FRONTEND_PORT=3000
+
+# Database
+MONGODB_URI=mongodb://mongodb:27017/qaero_dev
+REDIS_URL=redis://redis:6379
+
+# Authentication
+JWT_SECRET=your-secret-key-change-in-production
+JWT_EXPIRY=24h
+
+# Paths
+DATA_DIR=/app/data
+MODELS_DIR=/app/models
+CACHE_DIR=/app/cache
+
+# Performance
+WORKERS=4
+THREADS_PER_WORKER=2
+```
+
+---
+
+#### 3. Build & Start Services
+
+**Development Mode (with hot reload):**
+
+```bash
+# Build all images
+docker-compose -f docker-compose.dev.yml build
+
+# Start services
+docker-compose -f docker-compose.dev.yml up -d
+
+# View logs
+docker-compose logs -f
+
+# Check GPU access in ML service
+docker-compose exec ml-service nvidia-smi
+
+# Check service health
+curl http://localhost:8000/health  # ML service
+curl http://localhost:8001/health  # Physics service
+curl http://localhost:8002/health  # Quantum service
+curl http://localhost:4000/health  # Backend
+curl http://localhost:3000          # Frontend
+```
+
+**Expected Startup Time:**
+- Cold start: 2-3 minutes (first time, pulling images)
+- Warm start: 30-60 seconds
+
+---
+
+#### 4. Run Sample Inference
+
+**Test ML Inference:**
+
+```bash
+# Upload test mesh
+curl -X POST http://localhost:8000/api/v1/predict-pressure \
+  -F "mesh=@data/test_meshes/naca0012.stl" \
+  -F "velocity=250" \
+  -F "yaw=0"
+
+# Expected response time: 50-80ms (RTX 4070)
+```
+
+**Test Physics Service:**
+
+```bash
+curl -X POST http://localhost:8001/api/v1/vlm-solve \
+  -F "mesh=@data/test_meshes/wing.stl" \
+  -F "velocity=250" \
+  -F "alpha=5"
+
+# Expected response time: 5-10 seconds
+```
+
+---
+
+#### 5. Monitor GPU Usage
+
+**Real-Time Monitoring:**
+
+```bash
+# Terminal 1: Watch GPU usage
+watch -n 1 nvidia-smi
+
+# Terminal 2: Monitor Docker stats
+docker stats
+
+# Terminal 3: Check ML service logs
+docker-compose logs -f ml-service
+```
+
+**Key Metrics to Watch:**
+- **GPU Utilization:** Should be 80-95% during inference
+- **GPU Memory:** 6-7GB used (out of 12GB)
+- **GPU Temperature:** <75°C (good), <85°C (acceptable)
+- **Power Draw:** 150-180W (out of 200W TDP)
+
+---
+
+### Performance Benchmarking
+
+#### Benchmark Script
+
+```python
+# scripts/benchmark_rtx4070.py
+import time
+import torch
+import onnxruntime as ort
+import numpy as np
+
+def benchmark_inference(model_path, n_iterations=100):
+    """Benchmark ML inference on RTX 4070."""
+
+    # Load ONNX model
+    providers = [
+        ('CUDAExecutionProvider', {
+            'device_id': 0,
+            'gpu_mem_limit': 8 * 1024 * 1024 * 1024,  # 8GB
+        }),
+        'CPUExecutionProvider'
+    ]
+    session = ort.InferenceSession(model_path, providers=providers)
+
+    # Dummy input (simulate mesh with 10K vertices)
+    input_name = session.get_inputs()[0].name
+    dummy_input = np.random.randn(1, 10000, 3).astype(np.float32)
+
+    # Warmup
+    for _ in range(10):
+        session.run(None, {input_name: dummy_input})
+
+    # Benchmark
+    torch.cuda.synchronize()
+    start = time.time()
+
+    for _ in range(n_iterations):
+        outputs = session.run(None, {input_name: dummy_input})
+
+    torch.cuda.synchronize()
+    elapsed = time.time() - start
+
+    avg_time = (elapsed / n_iterations) * 1000  # ms
+    throughput = n_iterations / elapsed
+
+    print(f"=== RTX 4070 Benchmark Results ===")
+    print(f"Model: {model_path}")
+    print(f"Iterations: {n_iterations}")
+    print(f"Average Inference Time: {avg_time:.2f} ms")
+    print(f"Throughput: {throughput:.2f} inferences/sec")
+    print(f"Target: <100ms ✓" if avg_time < 100 else "Target: <100ms ✗")
+
+    return avg_time, throughput
+
+if __name__ == "__main__":
+    # Run benchmark
+    model_path = "models/surrogate_v1.onnx"
+    avg_time, throughput = benchmark_inference(model_path, n_iterations=100)
+
+    # GPU info
+    print(f"\nGPU: {torch.cuda.get_device_name(0)}")
+    print(f"CUDA Version: {torch.version.cuda}")
+    print(f"PyTorch Version: {torch.__version__}")
+    print(f"VRAM Available: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+```
+
+**Run Benchmark:**
+
+```bash
+python scripts/benchmark_rtx4070.py
+```
+
+**Expected Output:**
+```
+=== RTX 4070 Benchmark Results ===
+Model: models/surrogate_v1.onnx
+Iterations: 100
+Average Inference Time: 67.34 ms
+Throughput: 14.85 inferences/sec
+Target: <100ms ✓
+
+GPU: NVIDIA GeForce RTX 4070
+CUDA Version: 12.1
+PyTorch Version: 2.1.0+cu121
+VRAM Available: 12.00 GB
+```
+
+---
+
+### Optimization Tips for RTX 4070
+
+#### 1. Enable Mixed Precision (FP16)
+
+**Benefits:**
+- 1.8-2.0x faster inference
+- 50% less VRAM usage
+- Minimal accuracy loss (<0.5%)
+
+**Implementation:**
+
+```python
+# services/ml_inference/model.py
+import torch
+from torch.cuda.amp import autocast
+
+class SurrogateModel:
+    def __init__(self, model_path):
+        self.model = torch.jit.load(model_path).cuda()
+        self.model.eval()
+
+    @torch.no_grad()
+    @autocast()  # Automatic mixed precision
+    def predict(self, input_tensor):
+        with torch.cuda.amp.autocast():
+            output = self.model(input_tensor.half())  # FP16
+        return output.float()  # Convert back to FP32 for output
+```
+
+---
+
+#### 2. Batch Processing
+
+**Strategy:** Process multiple meshes simultaneously.
+
+**Implementation:**
+
+```python
+# Process 12 meshes at once (RTX 4070 sweet spot)
+batch_size = 12
+meshes = load_meshes(mesh_files[:batch_size])
+predictions = model.predict_batch(meshes)
+```
+
+**Performance Gain:** 8-10x throughput vs. sequential processing.
+
+---
+
+#### 3. CUDA Graphs (Advanced)
+
+**Benefits:**
+- Reduce kernel launch overhead
+- 10-15% faster for repeated operations
+
+**Implementation:**
+
+```python
+# Capture CUDA graph
+static_input = torch.randn(1, 10000, 3).cuda()
+s = torch.cuda.Stream()
+s.wait_stream(torch.cuda.current_stream())
+
+with torch.cuda.stream(s):
+    for _ in range(3):  # Warmup
+        static_output = model(static_input)
+s.synchronize()
+
+# Capture graph
+g = torch.cuda.CUDAGraph()
+with torch.cuda.graph(g):
+    static_output = model(static_input)
+
+# Replay graph (much faster)
+g.replay()
+```
+
+---
+
+#### 4. Optimize Docker Performance
+
+**Best Practices:**
+
+```dockerfile
+# services/ml_inference/Dockerfile
+FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    python3.11 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application
+COPY . /app
+WORKDIR /app
+
+# Optimize CUDA settings for RTX 4070
+ENV CUDA_VISIBLE_DEVICES=0
+ENV CUDA_DEVICE_ORDER=PCI_BUS_ID
+ENV TF_FORCE_GPU_ALLOW_GROWTH=true
+
+# Expose port
+EXPOSE 8000
+
+# Run with optimized settings
+CMD ["python", "-u", "main.py"]
+```
+
+---
+
+### Troubleshooting
+
+#### Issue 1: "CUDA out of memory"
+
+**Solution:**
+
+```python
+# Reduce batch size
+BATCH_SIZE = 8  # Instead of 12
+
+# Or enable gradient checkpointing
+torch.utils.checkpoint.checkpoint(model, inputs)
+
+# Or clear cache between runs
+torch.cuda.empty_cache()
+```
+
+---
+
+#### Issue 2: "nvidia-smi not found in Docker"
+
+**Solution:**
+
+```bash
+# Verify NVIDIA runtime
+docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi
+
+# If fails, reconfigure Docker
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+---
+
+#### Issue 3: Slow inference (>150ms)
+
+**Checklist:**
+
+```bash
+# 1. Check GPU utilization
+nvidia-smi
+
+# 2. Verify FP16 enabled
+grep "ENABLE_FP16" .env  # Should be true
+
+# 3. Check batch size
+grep "BATCH_SIZE" .env  # Should be 8-12
+
+# 4. Restart service
+docker-compose restart ml-service
+
+# 5. Run benchmark
+python scripts/benchmark_rtx4070.py
+```
+
+---
+
+### Proof of Concept Validation Checklist
+
+**Before proceeding to production:**
+
+- [ ] RTX 4070 drivers installed and verified (`nvidia-smi`)
+- [ ] CUDA 12.1+ toolkit installed (`nvcc --version`)
+- [ ] Docker with GPU support working (`docker run --gpus all nvidia/cuda nvidia-smi`)
+- [ ] All services starting successfully (`docker-compose up -d`)
+- [ ] ML inference <100ms (run `scripts/benchmark_rtx4070.py`)
+- [ ] GPU memory usage 6-8GB during inference
+- [ ] No CUDA OOM errors during 1-hour stress test
+- [ ] Frontend accessible at `http://localhost:3000`
+- [ ] Can upload mesh and view results end-to-end
+- [ ] All integration tests passing (`npm test`, `pytest`)
+
+---
+
+## Production-Ready Docker & Microservices Architecture
+
+### Overview
+
+This section provides **complete production deployment** configuration with Docker orchestration, CI/CD pipelines, monitoring, logging, and scaling strategies.
+
+**Production Environment:**
+- Cloud: AWS, Azure, or GCP (or on-premise GPU servers)
+- Orchestration: Docker Swarm or Kubernetes
+- Monitoring: Prometheus + Grafana
+- Logging: ELK Stack (Elasticsearch, Logstash, Kibana)
+- CI/CD: GitHub Actions
+- Load Balancing: NGINX
+- SSL/TLS: Let's Encrypt
+
+---
+
+### Complete Docker Compose Configuration
+
+#### Production docker-compose.yml
+
+```yaml
+# docker-compose.production.yml
+version: '3.8'
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true  # No external access
+
+volumes:
+  mongo-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+  model-cache:
+
+services:
+  # ============================================
+  # FRONTEND LAYER
+  # ============================================
+
+  frontend:
+    image: qaero/frontend:${VERSION:-latest}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.production
+      args:
+        NEXT_PUBLIC_API_URL: ${API_URL}
+    container_name: qaero-frontend
+    restart: unless-stopped
+    networks:
+      - frontend
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=${API_URL}
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    labels:
+      - "com.qaero.service=frontend"
+      - "com.qaero.version=${VERSION}"
+
+  # ============================================
+  # API GATEWAY / LOAD BALANCER
+  # ============================================
+
+  nginx:
+    image: nginx:alpine
+    container_name: qaero-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - frontend
+      - backend
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/cache:/var/cache/nginx
+    depends_on:
+      - frontend
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  # ============================================
+  # BACKEND LAYER
+  # ============================================
+
+  backend:
+    image: qaero/backend:${VERSION:-latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+    container_name: qaero-backend
+    restart: unless-stopped
+    networks:
+      - backend
+      - internal
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - MONGODB_URI=mongodb://mongodb:27017/qaero
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRY=24h
+      - LOG_LEVEL=info
+      - ML_SERVICE_URL=http://ml-service:8000
+      - PHYSICS_SERVICE_URL=http://physics-service:8001
+      - QUANTUM_SERVICE_URL=http://quantum-service:8002
+      - FSI_SERVICE_URL=http://fsi-service:8003
+    depends_on:
+      - mongodb
+      - redis
+      - ml-service
+      - physics-service
+      - quantum-service
+    deploy:
+      replicas: 3  # Load balanced
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  # ============================================
+  # MICROSERVICES LAYER
+  # ============================================
+
+  ml-service:
+    image: qaero/ml-inference:${VERSION:-latest}
+    build:
+      context: ./services/ml_inference
+      dockerfile: Dockerfile.production
+    container_name: qaero-ml-service
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - MODEL_PATH=/models/surrogate_v1.onnx
+      - BATCH_SIZE=16
+      - ENABLE_FP16=true
+      - LOG_LEVEL=info
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - model-cache:/models:ro
+      - ./data:/data:ro
+    depends_on:
+      - redis
+    deploy:
+      replicas: 2  # Scale for load
+      resources:
+        limits:
+          cpus: '8.0'
+          memory: 24G
+        reservations:
+          memory: 16G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
+
+  physics-service:
+    image: qaero/physics:${VERSION:-latest}
+    build:
+      context: ./services/physics
+      dockerfile: Dockerfile.production
+    container_name: qaero-physics-service
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      - VLM_CACHE_SIZE=1000
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=info
+    volumes:
+      - ./cache:/cache
+    depends_on:
+      - redis
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '12.0'
+          memory: 24G
+        reservations:
+          memory: 16G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  quantum-service:
+    image: qaero/quantum:${VERSION:-latest}
+    build:
+      context: ./services/quantum
+      dockerfile: Dockerfile.production
+    container_name: qaero-quantum-service
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      - QISKIT_BACKEND=aer_simulator
+      - QAOA_MAX_LAYERS=5
+      - LOG_LEVEL=info
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '8.0'
+          memory: 16G
+        reservations:
+          memory: 8G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  fsi-service:
+    image: qaero/fsi:${VERSION:-latest}
+    build:
+      context: ./services/fsi
+      dockerfile: Dockerfile.production
+    container_name: qaero-fsi-service
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      - OPENFOAM_VERSION=10
+      - LOG_LEVEL=info
+    volumes:
+      - ./simulations:/simulations
+    deploy:
+      replicas: 1  # Heavy computation, sequential
+      resources:
+        limits:
+          cpus: '16.0'
+          memory: 32G
+        reservations:
+          memory: 24G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500m"
+        max-file: "5"
+
+  # ============================================
+  # DATA LAYER
+  # ============================================
+
+  mongodb:
+    image: mongo:7
+    container_name: qaero-mongodb
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USER}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
+      - MONGO_INITDB_DATABASE=qaero
+    volumes:
+      - mongo-data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/init.js:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    command: ["mongod", "--auth", "--wiredTigerCacheSizeGB", "4"]
+
+  redis:
+    image: redis:7-alpine
+    container_name: qaero-redis
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - redis-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "3gb", "--maxmemory-policy", "allkeys-lru"]
+
+  # ============================================
+  # MONITORING & OBSERVABILITY
+  # ============================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: qaero-prometheus
+    restart: unless-stopped
+    networks:
+      - internal
+      - backend
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: qaero-grafana
+    restart: unless-stopped
+    networks:
+      - backend
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_SERVER_ROOT_URL=https://${DOMAIN}/grafana
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: qaero-node-exporter
+    restart: unless-stopped
+    networks:
+      - internal
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: qaero-cadvisor
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+```
+
+---
+
+### NGINX Configuration
+
+**nginx/nginx.conf:**
+
+```nginx
+# Production NGINX Configuration
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 4096;
+    use epoll;
+    multi_accept on;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for" '
+                    'rt=$request_time uct="$upstream_connect_time" '
+                    'uht="$upstream_header_time" urt="$upstream_response_time"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    client_max_body_size 100M;  # Allow large mesh uploads
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml text/javascript
+               application/json application/javascript application/xml+rss
+               application/rss+xml font/truetype font/opentype
+               application/vnd.ms-fontobject image/svg+xml;
+
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+    limit_req_zone $binary_remote_addr zone=upload_limit:10m rate=2r/s;
+
+    # Upstream backends
+    upstream backend_api {
+        least_conn;
+        server backend:4000 max_fails=3 fail_timeout=30s;
+        keepalive 32;
+    }
+
+    upstream frontend_app {
+        server frontend:3000 max_fails=3 fail_timeout=30s;
+        keepalive 32;
+    }
+
+    # HTTP to HTTPS redirect
+    server {
+        listen 80;
+        server_name ${DOMAIN};
+        return 301 https://$host$request_uri;
+    }
+
+    # HTTPS server
+    server {
+        listen 443 ssl http2;
+        server_name ${DOMAIN};
+
+        # SSL configuration
+        ssl_certificate /etc/nginx/ssl/cert.pem;
+        ssl_certificate_key /etc/nginx/ssl/key.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+        ssl_prefer_server_ciphers on;
+        ssl_session_cache shared:SSL:10m;
+        ssl_session_timeout 10m;
+
+        # Security headers
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
+        # Frontend
+        location / {
+            proxy_pass http://frontend_app;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Backend API
+        location /api/ {
+            limit_req zone=api_limit burst=20 nodelay;
+
+            proxy_pass http://backend_api;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            # Timeouts for long-running requests
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 600s;
+            proxy_read_timeout 600s;
+        }
+
+        # File uploads (mesh files)
+        location /api/upload/ {
+            limit_req zone=upload_limit burst=5 nodelay;
+
+            client_max_body_size 100M;
+            proxy_pass http://backend_api;
+            proxy_request_buffering off;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $host;
+        }
+
+        # Health checks (no auth required)
+        location /health {
+            proxy_pass http://backend_api/health;
+            access_log off;
+        }
+
+        # Grafana monitoring
+        location /grafana/ {
+            proxy_pass http://grafana:3000/;
+            proxy_set_header Host $host;
+        }
+
+        # Static assets (cached)
+        location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
+            proxy_pass http://frontend_app;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+}
+```
+
+---
+
+### CI/CD Pipeline
+
+#### GitHub Actions Workflow
+
+**.github/workflows/ci-cd.yml:**
+
+```yaml
+name: Q-Aero CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ==========================================
+  # STAGE 1: Code Quality & Testing
+  # ==========================================
+
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          npm install
+          pip install -r requirements.txt
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Pylint
+        run: pylint **/*.py
+
+      - name: Run unit tests (JavaScript)
+        run: npm test -- --coverage
+
+      - name: Run unit tests (Python)
+        run: pytest --cov=services --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/coverage-final.json,./coverage.xml
+
+  # ==========================================
+  # STAGE 2: Build Docker Images
+  # ==========================================
+
+  build-images:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        service:
+          - frontend
+          - backend
+          - ml-inference
+          - physics
+          - quantum
+          - fsi
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./${{ matrix.service == 'ml-inference' && 'services/ml_inference' || matrix.service == 'physics' && 'services/physics' || matrix.service == 'quantum' && 'services/quantum' || matrix.service == 'fsi' && 'services/fsi' || matrix.service }}
+          file: ./${{ matrix.service == 'ml-inference' && 'services/ml_inference' || matrix.service == 'physics' && 'services/physics' || matrix.service == 'quantum' && 'services/quantum' || matrix.service == 'fsi' && 'services/fsi' || matrix.service }}/Dockerfile.production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ==========================================
+  # STAGE 3: Integration Testing
+  # ==========================================
+
+  integration-tests:
+    needs: build-images
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: password
+        ports:
+          - 27017:27017
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Compose
+        run: |
+          docker-compose -f docker-compose.test.yml pull
+          docker-compose -f docker-compose.test.yml up -d
+
+      - name: Wait for services to be ready
+        run: |
+          ./scripts/wait-for-services.sh
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      - name: Run E2E tests
+        run: npx playwright test
+
+      - name: Collect logs on failure
+        if: failure()
+        run: docker-compose -f docker-compose.test.yml logs
+
+      - name: Cleanup
+        if: always()
+        run: docker-compose -f docker-compose.test.yml down -v
+
+  # ==========================================
+  # STAGE 4: Security Scan
+  # ==========================================
+
+  security-scan:
+    needs: build-images
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ==========================================
+  # STAGE 5: Deploy to Staging
+  # ==========================================
+
+  deploy-staging:
+    needs: [integration-tests, security-scan]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.qaero.ai
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Deploy to staging
+        run: |
+          ./scripts/deploy.sh staging
+
+      - name: Run smoke tests
+        run: |
+          ./scripts/smoke-test.sh https://staging.qaero.ai
+
+  # ==========================================
+  # STAGE 6: Deploy to Production
+  # ==========================================
+
+  deploy-production:
+    needs: [integration-tests, security-scan]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    environment:
+      name: production
+      url: https://qaero.ai
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          aws-region: us-east-1
+
+      - name: Deploy to production
+        run: |
+          ./scripts/deploy.sh production
+
+      - name: Run smoke tests
+        run: |
+          ./scripts/smoke-test.sh https://qaero.ai
+
+      - name: Notify Slack
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Q-Aero deployment to production completed!'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+```
+
+---
+
+### Monitoring Configuration
+
+#### Prometheus Configuration
+
+**prometheus/prometheus.yml:**
+
+```yaml
+# Prometheus configuration
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'qaero-production'
+    replica: 'replica-1'
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+# Rule files
+rule_files:
+  - '/etc/prometheus/rules/*.yml'
+
+# Scrape configurations
+scrape_configs:
+  # Backend API
+  - job_name: 'backend'
+    static_configs:
+      - targets: ['backend:4000']
+    metrics_path: '/metrics'
+
+  # ML Inference Service
+  - job_name: 'ml-service'
+    static_configs:
+      - targets: ['ml-service:8000']
+    metrics_path: '/metrics'
+
+  # Physics Service
+  - job_name: 'physics-service'
+    static_configs:
+      - targets: ['physics-service:8001']
+    metrics_path: '/metrics'
+
+  # Quantum Service
+  - job_name: 'quantum-service'
+    static_configs:
+      - targets: ['quantum-service:8002']
+    metrics_path: '/metrics'
+
+  # FSI Service
+  - job_name: 'fsi-service'
+    static_configs:
+      - targets: ['fsi-service:8003']
+    metrics_path: '/metrics'
+
+  # MongoDB
+  - job_name: 'mongodb'
+    static_configs:
+      - targets: ['mongodb:27017']
+
+  # Redis
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+
+  # Node Exporter (host metrics)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # cAdvisor (container metrics)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # NVIDIA GPU metrics (if available)
+  - job_name: 'nvidia-gpu'
+    static_configs:
+      - targets: ['nvidia-exporter:9445']
+```
+
+---
+
+### Scaling Strategies
+
+#### Horizontal Scaling (Docker Swarm)
+
+```bash
+# Initialize Docker Swarm
+docker swarm init
+
+# Deploy stack
+docker stack deploy -c docker-compose.production.yml qaero
+
+# Scale services dynamically
+docker service scale qaero_backend=5
+docker service scale qaero_ml-service=3
+docker service scale qaero_physics-service=4
+
+# Auto-scaling based on CPU usage
+docker service update \
+  --replicas-max-per-node 2 \
+  --reserve-cpu 2 \
+  --reserve-memory 8G \
+  qaero_ml-service
+```
+
+---
+
+#### Kubernetes Deployment (Advanced)
+
+**k8s/deployment.yaml:**
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-service
+  labels:
+    app: qaero
+    service: ml-inference
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: qaero
+      service: ml-inference
+  template:
+    metadata:
+      labels:
+        app: qaero
+        service: ml-inference
+    spec:
+      containers:
+      - name: ml-inference
+        image: ghcr.io/qaero/ml-inference:latest
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            memory: "16Gi"
+            cpu: "4"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "24Gi"
+            cpu: "8"
+            nvidia.com/gpu: 1
+        env:
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: MODEL_PATH
+          value: "/models/surrogate_v1.onnx"
+        volumeMounts:
+        - name: model-cache
+          mountPath: /models
+          readOnly: true
+      volumes:
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: model-cache-pvc
+      nodeSelector:
+        gpu: nvidia-rtx
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ml-service-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ml-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+```
+
+---
+
+### Production Deployment Checklist
+
+**Pre-Deployment:**
+
+- [ ] All services built and pushed to container registry
+- [ ] Environment variables configured in `.env.production`
+- [ ] SSL certificates obtained (Let's Encrypt)
+- [ ] MongoDB secured with authentication
+- [ ] Redis password protected
+- [ ] Secrets stored in secure vault (AWS Secrets Manager, HashiCorp Vault)
+- [ ] Backup strategy configured (daily MongoDB backups)
+- [ ] Monitoring dashboards created in Grafana
+- [ ] Alert rules configured in Prometheus
+- [ ] Log aggregation configured (ELK stack)
+
+**Deployment:**
+
+- [ ] Deploy to staging environment first
+- [ ] Run smoke tests on staging
+- [ ] Monitor metrics for 24 hours on staging
+- [ ] Blue-green deployment to production
+- [ ] Run smoke tests on production
+- [ ] Monitor for anomalies (CPU, memory, errors)
+- [ ] Enable auto-scaling policies
+
+**Post-Deployment:**
+
+- [ ] Verify all services healthy (`docker ps`, `kubectl get pods`)
+- [ ] Check logs for errors (`docker logs`, `kubectl logs`)
+- [ ] Monitor dashboard for 72 hours
+- [ ] Document any issues encountered
+- [ ] Update runbook with lessons learned
 
 ---
 
