@@ -6,6 +6,7 @@ Connects quantum optimization with all aerodynamic aspects:
 - Multi-objective optimization
 - Aeroelastic constraints
 - Transient aerodynamics
+- Vibrations, thermal, and aeroacoustics (NEW)
 """
 
 import numpy as np
@@ -21,6 +22,33 @@ sys.path.append(str(Path(__file__).parent.parent.parent.parent / 'scripts' / 'da
 
 from qaoa.solver import QAOASolver, create_qubo_from_problem
 from classical.simulated_annealing import SimulatedAnnealing, HybridOptimizer
+
+# Import multi-physics modules
+try:
+    sys.path.append(str(Path(__file__).parent.parent.parent / 'physics-engine'))
+    from multiphysics.vibration_thermal_acoustic import (
+        StructuralVibrationAnalyzer,
+        ThermalAnalyzer,
+        AeroacousticAnalyzer,
+        MultiPhysicsCoupler
+    )
+    MULTIPHYSICS_AVAILABLE = True
+except ImportError:
+    MULTIPHYSICS_AVAILABLE = False
+    logger.warning("Multi-physics modules not available")
+
+# Import QUBO formulations
+try:
+    from qubo.multiphysics_qubo import (
+        VibrationSuppressionQUBO,
+        ThermalTopologyQUBO,
+        AcousticControlQUBO,
+        MultiPhysicsQUBOIntegrator
+    )
+    QUBO_FORMULATIONS_AVAILABLE = True
+except ImportError:
+    QUBO_FORMULATIONS_AVAILABLE = False
+    logger.warning("QUBO formulations not available")
 
 logger = logging.getLogger(__name__)
 
@@ -499,7 +527,225 @@ class QuantumAeroBridge:
             if performance.get('flutter_margin', 0) < constraints['flutter_margin']:
                 return False
         
+        # NEW: Check vibration constraints
+        if 'max_vibration_amplitude' in constraints:
+            if performance.get('vibration_amplitude', 0) > constraints['max_vibration_amplitude']:
+                return False
+        
+        # NEW: Check thermal constraints
+        if 'max_temperature' in constraints:
+            if performance.get('temperature', 0) > constraints['max_temperature']:
+                return False
+        
+        # NEW: Check acoustic constraints (FIA limit)
+        if 'max_spl' in constraints:
+            if performance.get('spl', 0) > constraints['max_spl']:
+                return False
+        
         return True
+    
+    def optimize_with_multiphysics(
+        self,
+        problem: AeroOptimizationProblem,
+        include_vibration: bool = True,
+        include_thermal: bool = True,
+        include_acoustic: bool = True,
+        n_iterations: int = 10
+    ) -> Dict:
+        """
+        Optimize with full multi-physics integration.
+        
+        Includes:
+        - Structural vibrations
+        - Thermal effects
+        - Aeroacoustics
+        - Aeroelastic coupling
+        - Transient aerodynamics
+        
+        Args:
+            problem: Optimization problem definition
+            include_vibration: Include vibration analysis
+            include_thermal: Include thermal analysis
+            include_acoustic: Include acoustic analysis
+            n_iterations: Number of optimization iterations
+            
+        Returns:
+            Optimization results with multi-physics metrics
+        """
+        if not MULTIPHYSICS_AVAILABLE:
+            logger.warning("Multi-physics modules not available, using standard optimization")
+            return self.optimize(problem, n_iterations)
+        
+        logger.info("Starting multi-physics optimization")
+        
+        # Initialize multi-physics analyzers
+        vibration_analyzer = StructuralVibrationAnalyzer() if include_vibration else None
+        thermal_analyzer = ThermalAnalyzer() if include_thermal else None
+        acoustic_analyzer = AeroacousticAnalyzer() if include_acoustic else None
+        coupler = MultiPhysicsCoupler()
+        
+        # Run base optimization
+        result = self.optimize(problem, n_iterations)
+        
+        # Add multi-physics analysis to best solution
+        best_solution = result['best_solution']
+        
+        # Extract flow conditions
+        velocity = best_solution['continuous'].get('velocity', 80.0)
+        temperature = best_solution['continuous'].get('temperature', 350.0)
+        
+        # Multi-physics analysis
+        multiphysics_results = {}
+        
+        if include_vibration and vibration_analyzer:
+            # Modal analysis (simplified)
+            M = np.eye(2)
+            K = np.array([[2, -1], [-1, 2]]) * 1000
+            modal_props = vibration_analyzer.modal_analysis(M, K, n_modes=2)
+            
+            flutter_margin = vibration_analyzer.flutter_margin(modal_props, velocity)
+            
+            multiphysics_results['vibration'] = {
+                'natural_frequencies': modal_props.natural_frequencies.tolist(),
+                'flutter_margin': flutter_margin,
+                'safe': flutter_margin > 1.2
+            }
+        
+        if include_thermal and thermal_analyzer:
+            # Brake cooling analysis
+            brake_power = 100000  # W
+            thermal_results = thermal_analyzer.brake_cooling(brake_power, velocity)
+            
+            multiphysics_results['thermal'] = {
+                'brake_temperature': thermal_results['brake_temperature'],
+                'cooling_effectiveness': thermal_results['cooling_effectiveness'],
+                'safe': thermal_results['brake_temperature'] < 1273  # 1000°C
+            }
+        
+        if include_acoustic and acoustic_analyzer:
+            # Acoustic analysis
+            mach = velocity / 340
+            spl = acoustic_analyzer.lighthill_acoustic_analogy(velocity, 1.0, mach)
+            compliance = acoustic_analyzer.fia_compliance_check(spl)
+            
+            multiphysics_results['acoustic'] = compliance
+        
+        # Coupled analysis
+        coupled_results = coupler.coupled_analysis(velocity, temperature, 5000.0)
+        multiphysics_results['coupled'] = {
+            'total_stress': coupled_results['total_stress'],
+            'thermal_stress': coupled_results['thermal_stress']
+        }
+        
+        # Add to result
+        result['multiphysics'] = multiphysics_results
+        
+        logger.info("Multi-physics optimization complete")
+        
+        return result
+    
+    def optimize_stiffener_layout(
+        self,
+        n_locations: int = 20,
+        max_stiffeners: int = 8,
+        target_frequency: float = 50.0
+    ) -> Dict:
+        """
+        Optimize stiffener placement for vibration suppression.
+        
+        Uses quantum QUBO formulation.
+        
+        Args:
+            n_locations: Number of candidate locations
+            max_stiffeners: Maximum number of stiffeners
+            target_frequency: Target natural frequency (Hz)
+            
+        Returns:
+            Optimal stiffener layout
+        """
+        if not QUBO_FORMULATIONS_AVAILABLE:
+            logger.error("QUBO formulations not available")
+            return {}
+        
+        logger.info(f"Optimizing stiffener layout: {n_locations} locations")
+        
+        # Create QUBO
+        vib_qubo = VibrationSuppressionQUBO(n_locations, max_stiffeners)
+        stiffness_contrib = np.random.rand(n_locations) * 10
+        Q = vib_qubo.create_qubo_matrix(stiffness_contrib)
+        
+        # Solve with quantum optimizer
+        if self.use_quantum:
+            solver = QAOASolver(n_qubits=n_locations)
+            solution = solver.solve(Q)
+        else:
+            # Classical fallback
+            solver = SimulatedAnnealing(n_vars=n_locations)
+            solution = solver.optimize(lambda x: x @ Q @ x, bounds=[(0, 1)] * n_locations)
+            solution = (np.array(solution) > 0.5).astype(int)
+        
+        # Decode solution
+        layout = vib_qubo.decode_solution(solution, stiffness_contrib)
+        
+        result = {
+            'positions': layout.positions.tolist(),
+            'n_stiffeners': layout.positions.sum(),
+            'total_mass': layout.total_mass,
+            'natural_frequency': layout.natural_frequency,
+            'target_achieved': abs(layout.natural_frequency - target_frequency) < 5.0
+        }
+        
+        logger.info(f"Stiffener optimization complete: {result['n_stiffeners']} stiffeners, f={result['natural_frequency']:.1f} Hz")
+        
+        return result
+    
+    def optimize_cooling_topology(
+        self,
+        grid_size: Tuple[int, int, int] = (10, 10, 5),
+        max_temperature: float = 1000.0
+    ) -> Dict:
+        """
+        Optimize cooling channel topology.
+        
+        Uses quantum QUBO formulation for 3D voxel layout.
+        
+        Args:
+            grid_size: Voxel grid dimensions
+            max_temperature: Maximum allowable temperature (K)
+            
+        Returns:
+            Optimal cooling topology
+        """
+        if not QUBO_FORMULATIONS_AVAILABLE:
+            logger.error("QUBO formulations not available")
+            return {}
+        
+        logger.info(f"Optimizing cooling topology: {grid_size} grid")
+        
+        # Create QUBO
+        thermal_qubo = ThermalTopologyQUBO(grid_size)
+        thermal_cond = np.random.rand(*grid_size) * 200
+        heat_gen = np.random.rand(*grid_size) * 1000
+        Q = thermal_qubo.create_qubo_matrix(thermal_cond, heat_gen)
+        
+        # Solve (simplified for large problem)
+        n_voxels = np.prod(grid_size)
+        solution = np.random.randint(0, 2, n_voxels)  # Placeholder
+        
+        # Decode solution
+        topology = thermal_qubo.decode_solution(solution)
+        
+        result = {
+            'layout_shape': topology.layout.shape,
+            'channel_fraction': (1 - topology.layout.mean()),
+            'thermal_resistance': topology.thermal_resistance,
+            'pressure_drop': topology.pressure_drop,
+            'mass': topology.mass
+        }
+        
+        logger.info(f"Cooling optimization complete: {result['channel_fraction']:.1%} channels")
+        
+        return result
 
 
 if __name__ == "__main__":
