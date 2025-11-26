@@ -1,0 +1,164 @@
+"""
+D-Wave Annealing API Endpoints
+FastAPI service for quantum annealing optimization
+"""
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import Dict, Any, List, Optional
+
+from .annealer import DWaveAeroAnnealer
+
+# Initialize FastAPI app
+app = FastAPI(title="D-Wave Quantum Annealing API", version="1.0.0")
+
+# Global annealer instance
+annealer: Optional[DWaveAeroAnnealer] = None
+
+
+# Request/Response Models
+class OptimizeWingRequest(BaseModel):
+    num_elements: int = 50
+    target_cl: float = 2.8
+    target_cd: float = 0.4
+    balance_target: float = 0.5
+    num_reads: int = 1000
+
+
+class WingElement(BaseModel):
+    element: int
+    angle: float
+    position: float
+    flap_active: bool
+
+
+class OptimizeWingResponse(BaseModel):
+    energy: float
+    num_occurrences: int
+    num_reads: int
+    problem_size: int
+    backend: str
+    wing_configuration: List[WingElement]
+    num_elements: int
+    target_cl: float
+    target_cd: float
+
+
+class HardwarePropertiesResponse(BaseModel):
+    available: bool
+    topology: str
+    num_qubits: int
+    connectivity: int
+    annealing_time_range: List[int]
+    backend: str
+
+
+# API Endpoints
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize D-Wave annealer on startup"""
+    global annealer
+    
+    annealer = DWaveAeroAnnealer(
+        use_hardware=False,  # Set to True for real hardware
+        num_reads=1000
+    )
+    print("✓ D-Wave annealer initialized")
+
+
+@app.get("/")
+async def root():
+    """API root"""
+    return {
+        "service": "D-Wave Quantum Annealing API",
+        "version": "1.0.0",
+        "status": "ready",
+        "problem_size": "5000+ variables",
+        "topology": "Pegasus (5640 qubits)"
+    }
+
+
+@app.post("/api/quantum/dwave/optimize-wing", response_model=OptimizeWingResponse)
+async def optimize_wing(request: OptimizeWingRequest):
+    """
+    Optimize multi-element wing configuration
+    
+    Target: 5000+ variable problems on Pegasus topology
+    """
+    if annealer is None:
+        raise HTTPException(status_code=503, detail="Annealer not initialized")
+    
+    try:
+        result = annealer.optimize_wing(
+            num_elements=request.num_elements,
+            target_cl=request.target_cl,
+            target_cd=request.target_cd,
+            balance_target=request.balance_target
+        )
+        
+        # Convert wing configuration
+        wing_config = [WingElement(**elem) for elem in result['wing_configuration']]
+        
+        return OptimizeWingResponse(
+            energy=result['energy'],
+            num_occurrences=result['num_occurrences'],
+            num_reads=result['num_reads'],
+            problem_size=result['problem_size'],
+            backend=result['backend'],
+            wing_configuration=wing_config,
+            num_elements=result['num_elements'],
+            target_cl=result['target_cl'],
+            target_cd=result['target_cd']
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/quantum/dwave/hardware-properties", response_model=HardwarePropertiesResponse)
+async def hardware_properties():
+    """
+    Get D-Wave hardware properties
+    
+    Returns Pegasus topology information
+    """
+    if annealer is None:
+        raise HTTPException(status_code=503, detail="Annealer not initialized")
+    
+    try:
+        props = annealer.get_hardware_properties()
+        return HardwarePropertiesResponse(**props)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/quantum/dwave/topology")
+async def get_topology():
+    """
+    Get Pegasus topology information
+    """
+    return {
+        "type": "Pegasus",
+        "description": "D-Wave Advantage Pegasus topology",
+        "num_qubits": 5640,
+        "connectivity": 15,
+        "structure": {
+            "rows": 16,
+            "columns": 16,
+            "vertical_offsets": 12,
+            "horizontal_offsets": 12
+        },
+        "advantages": [
+            "15-way qubit connectivity",
+            "Reduced embedding overhead",
+            "Better for dense problems",
+            "5640 qubits available"
+        ]
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8006)
