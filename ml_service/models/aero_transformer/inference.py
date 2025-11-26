@@ -1,0 +1,268 @@
+"""
+AeroTransformer Inference Service
+Fast <50ms inference for 3D flow field prediction
+"""
+
+import torch
+import torch.nn as nn
+import time
+from typing import Dict, Any, Optional
+import numpy as np
+
+from .model import AeroTransformer, create_aero_transformer
+
+
+class AeroTransformerInference:
+    """
+    Fast inference service for AeroTransformer
+    
+    Target: <50ms inference time on RTX 4090
+    """
+    
+    def __init__(
+        self,
+        model_path: str,
+        model_size: str = 'base',
+        device: str = 'cuda'
+    ):
+        self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
+        
+        # Load model
+        print(f"Loading AeroTransformer ({model_size}) on {self.device}...")
+        checkpoint = torch.load(model_path, map_location=self.device)
+        
+        # Create model
+        volume_size = checkpoint['config'].get('volume_size', (64, 64, 64))
+        self.model = create_aero_transformer(model_size, volume_size)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.model = self.model.to(self.device)
+        self.model.eval()
+        
+        # Compile model for faster inference (PyTorch 2.0+)
+        if hasattr(torch, 'compile'):
+            print("Compiling model with torch.compile()...")
+            self.model = torch.compile(self.model)
+        
+        # Warm-up
+        self._warmup()
+        
+        print(f"✓ Model loaded and ready for inference")
+    
+    def _warmup(self, num_iterations: int = 10):
+        """Warm-up GPU for consistent timing"""
+        print("Warming up GPU...")
+        dummy_input = torch.randn(1, 3, 64, 64, 64).to(self.device)
+        
+        with torch.no_grad():
+            for _ in range(num_iterations):
+                _ = self.model(dummy_input)
+        
+        torch.cuda.synchronize()
+        print("✓ Warm-up complete")
+    
+    @torch.no_grad()
+    def predict(
+        self,
+        geometry: np.ndarray,
+        return_timing: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Predict flow fields from geometry
+        
+        Args:
+            geometry: (C, D, H, W) numpy array - mesh geometry
+            return_timing: Whether to return inference time
+        
+        Returns:
+            dict with:
+                - pressure: (D, H, W) pressure field
+                - velocity: (3, D, H, W) velocity field [u, v, w]
+                - turbulence: (3, D, H, W) turbulence [k, omega, nut]
+                - inference_time_ms: Inference time in milliseconds
+        """
+        # Convert to tensor
+        if isinstance(geometry, np.ndarray):
+            geometry = torch.from_numpy(geometry).float()
+        
+        # Add batch dimension if needed
+        if geometry.dim() == 4:
+            geometry = geometry.unsqueeze(0)
+        
+        geometry = geometry.to(self.device)
+        
+        # Start timing
+        if return_timing:
+            start_time = time.perf_counter()
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize()
+        
+        # Inference
+        output = self.model(geometry)
+        
+        # End timing
+        if return_timing:
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize()
+            inference_time = (time.perf_counter() - start_time) * 1000  # ms
+        else:
+            inference_time = None
+        
+        # Convert to numpy
+        output = output.squeeze(0).cpu().numpy()
+        
+        # Split into components
+        pressure = output[0]  # Pressure field
+        velocity = output[1:4]  # u, v, w
+        turbulence = output[4:7]  # k, omega, nut
+        
+        result = {
+            'pressure': pressure,
+            'velocity': velocity,
+            'turbulence': turbulence
+        }
+        
+        if return_timing:
+            result['inference_time_ms'] = inference_time
+        
+        return result
+    
+    @torch.no_grad()
+    def predict_batch(
+        self,
+        geometries: np.ndarray,
+        batch_size: int = 4
+    ) -> Dict[str, Any]:
+        """
+        Batch inference for multiple geometries
+        
+        Args:
+            geometries: (N, C, D, H, W) numpy array
+            batch_size: Batch size for inference
+        
+        Returns:
+            dict with batched predictions
+        """
+        num_samples = geometries.shape[0]
+        all_results = []
+        
+        total_start = time.perf_counter()
+        
+        for i in range(0, num_samples, batch_size):
+            batch = geometries[i:i+batch_size]
+            batch_tensor = torch.from_numpy(batch).float().to(self.device)
+            
+            # Inference
+            outputs = self.model(batch_tensor)
+            outputs = outputs.cpu().numpy()
+            
+            # Store results
+            for j in range(outputs.shape[0]):
+                all_results.append({
+                    'pressure': outputs[j, 0],
+                    'velocity': outputs[j, 1:4],
+                    'turbulence': outputs[j, 4:7]
+                })
+        
+        if self.device.type == 'cuda':
+            torch.cuda.synchronize()
+        
+        total_time = (time.perf_counter() - total_start) * 1000
+        avg_time = total_time / num_samples
+        
+        return {
+            'results': all_results,
+            'total_time_ms': total_time,
+            'avg_time_ms': avg_time,
+            'num_samples': num_samples
+        }
+    
+    def benchmark(self, num_iterations: int = 100) -> Dict[str, float]:
+        """
+        Benchmark inference performance
+        
+        Target: <50ms on RTX 4090
+        """
+        print(f"\nBenchmarking inference ({num_iterations} iterations)...")
+        
+        dummy_input = torch.randn(1, 3, 64, 64, 64).to(self.device)
+        times = []
+        
+        # Warm-up
+        for _ in range(10):
+            _ = self.model(dummy_input)
+        
+        # Benchmark
+        for _ in range(num_iterations):
+            start = time.perf_counter()
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize()
+            
+            _ = self.model(dummy_input)
+            
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize()
+            
+            elapsed = (time.perf_counter() - start) * 1000
+            times.append(elapsed)
+        
+        times = np.array(times)
+        
+        results = {
+            'mean_ms': float(np.mean(times)),
+            'std_ms': float(np.std(times)),
+            'min_ms': float(np.min(times)),
+            'max_ms': float(np.max(times)),
+            'median_ms': float(np.median(times)),
+            'p95_ms': float(np.percentile(times, 95)),
+            'p99_ms': float(np.percentile(times, 99))
+        }
+        
+        print(f"\nBenchmark Results:")
+        print(f"  Mean: {results['mean_ms']:.2f} ms")
+        print(f"  Std: {results['std_ms']:.2f} ms")
+        print(f"  Min: {results['min_ms']:.2f} ms")
+        print(f"  Max: {results['max_ms']:.2f} ms")
+        print(f"  P95: {results['p95_ms']:.2f} ms")
+        print(f"  P99: {results['p99_ms']:.2f} ms")
+        
+        if results['mean_ms'] < 50:
+            print(f"  ✓ Target achieved (<50ms)")
+        else:
+            print(f"  ✗ Target not met (>{results['mean_ms']:.2f}ms)")
+        
+        return results
+
+
+def main():
+    """Example usage"""
+    
+    # Create inference service
+    inference = AeroTransformerInference(
+        model_path='checkpoints/aerotransformer/best_model.pt',
+        model_size='base',
+        device='cuda'
+    )
+    
+    # Generate test geometry
+    test_geometry = np.random.randn(3, 64, 64, 64).astype(np.float32)
+    
+    # Single prediction
+    result = inference.predict(test_geometry)
+    print(f"\nSingle prediction:")
+    print(f"  Inference time: {result['inference_time_ms']:.2f} ms")
+    print(f"  Pressure shape: {result['pressure'].shape}")
+    print(f"  Velocity shape: {result['velocity'].shape}")
+    
+    # Batch prediction
+    test_batch = np.random.randn(10, 3, 64, 64, 64).astype(np.float32)
+    batch_result = inference.predict_batch(test_batch, batch_size=4)
+    print(f"\nBatch prediction:")
+    print(f"  Total time: {batch_result['total_time_ms']:.2f} ms")
+    print(f"  Avg time: {batch_result['avg_time_ms']:.2f} ms")
+    
+    # Benchmark
+    benchmark_results = inference.benchmark(num_iterations=100)
+
+
+if __name__ == "__main__":
+    main()
