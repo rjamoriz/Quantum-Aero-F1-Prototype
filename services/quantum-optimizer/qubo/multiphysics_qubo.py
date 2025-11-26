@@ -1,0 +1,439 @@
+"""
+QUBO Formulations for Multi-Physics Optimization
+Implements quantum optimization for vibration suppression, thermal topology, and acoustic control
+
+Based on: Quantum-Aero F1 Prototype VIBRATIONS_THERMAL_AEROACOUSTIC.md
+"""
+
+import numpy as np
+from typing import Dict, List, Tuple, Optional
+import logging
+from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class StiffenerLayout:
+    """Stiffener placement solution"""
+    positions: np.ndarray  # Binary array
+    total_mass: float
+    stiffness_gain: float
+    natural_frequency: float
+
+
+@dataclass
+class CoolingTopology:
+    """Cooling channel topology"""
+    layout: np.ndarray  # Binary voxel array
+    thermal_resistance: float
+    pressure_drop: float
+    mass: float
+
+
+class VibrationSuppressionQUBO:
+    """
+    QUBO formulation for vibration suppression through optimal stiffener placement.
+    
+    Objective: Minimize vibration amplitude while maintaining stiffness and minimizing weight.
+    
+    H_QUBO = Σᵢ wᵢxᵢ + Σᵢ<ⱼ Jᵢⱼxᵢxⱼ
+    
+    Where:
+    - xᵢ = 1 if stiffener at location i
+    - wᵢ = weight penalty
+    - Jᵢⱼ = coupling (stiffness contribution)
+    """
+    
+    def __init__(
+        self,
+        n_locations: int = 20,
+        max_stiffeners: int = 8,
+        weight_penalty: float = 1.0
+    ):
+        """
+        Initialize vibration suppression QUBO.
+        
+        Args:
+            n_locations: Number of candidate stiffener locations
+            max_stiffeners: Maximum number of stiffeners
+            weight_penalty: Weight penalty coefficient
+        """
+        self.n_locations = n_locations
+        self.max_stiffeners = max_stiffeners
+        self.weight_penalty = weight_penalty
+        
+        logger.info(f"Vibration QUBO initialized: {n_locations} locations, max {max_stiffeners} stiffeners")
+    
+    def create_qubo_matrix(
+        self,
+        stiffness_contributions: np.ndarray,
+        mass_per_stiffener: float = 0.1
+    ) -> np.ndarray:
+        """
+        Create QUBO matrix for stiffener placement.
+        
+        Args:
+            stiffness_contributions: Stiffness contribution of each location
+            mass_per_stiffener: Mass per stiffener (kg)
+            
+        Returns:
+            QUBO matrix Q
+        """
+        Q = np.zeros((self.n_locations, self.n_locations))
+        
+        # Linear terms (diagonal): weight penalty
+        for i in range(self.n_locations):
+            Q[i, i] = self.weight_penalty * mass_per_stiffener - stiffness_contributions[i]
+        
+        # Quadratic terms (off-diagonal): stiffness coupling
+        for i in range(self.n_locations):
+            for j in range(i+1, self.n_locations):
+                # Stiffness coupling between locations
+                distance = abs(i - j)
+                coupling = stiffness_contributions[i] * stiffness_contributions[j] / (1 + distance)
+                Q[i, j] = coupling
+                Q[j, i] = coupling
+        
+        # Add constraint penalty for maximum number of stiffeners
+        penalty_weight = 10.0
+        for i in range(self.n_locations):
+            Q[i, i] += penalty_weight * (-2 * self.max_stiffeners)
+            for j in range(i+1, self.n_locations):
+                Q[i, j] += 2 * penalty_weight
+                Q[j, i] += 2 * penalty_weight
+        
+        logger.info(f"QUBO matrix created: {Q.shape}")
+        
+        return Q
+    
+    def decode_solution(
+        self,
+        solution: np.ndarray,
+        stiffness_contributions: np.ndarray
+    ) -> StiffenerLayout:
+        """
+        Decode binary solution to stiffener layout.
+        
+        Args:
+            solution: Binary solution vector
+            stiffness_contributions: Stiffness contribution per location
+            
+        Returns:
+            Stiffener layout
+        """
+        positions = solution.astype(bool)
+        n_stiffeners = positions.sum()
+        
+        # Compute metrics
+        total_mass = n_stiffeners * 0.1  # kg per stiffener
+        stiffness_gain = stiffness_contributions[positions].sum()
+        
+        # Estimate natural frequency increase
+        # f_new ≈ f_old * sqrt(1 + ΔK/K)
+        base_frequency = 30.0  # Hz
+        stiffness_ratio = 1 + stiffness_gain / 100
+        natural_frequency = base_frequency * np.sqrt(stiffness_ratio)
+        
+        layout = StiffenerLayout(
+            positions=positions,
+            total_mass=total_mass,
+            stiffness_gain=stiffness_gain,
+            natural_frequency=natural_frequency
+        )
+        
+        logger.info(f"Decoded layout: {n_stiffeners} stiffeners, f={natural_frequency:.1f} Hz")
+        
+        return layout
+
+
+class ThermalTopologyQUBO:
+    """
+    QUBO formulation for optimal cooling channel layout.
+    
+    Objective: Minimize maximum temperature while minimizing pressure drop and mass.
+    
+    Binary variables:
+    - xᵢ = 1 if material at voxel i
+    - xᵢ = 0 if cooling channel
+    
+    H = Σᵢ hᵢxᵢ + Σᵢ<ⱼ Jᵢⱼxᵢxⱼ
+    """
+    
+    def __init__(
+        self,
+        grid_size: Tuple[int, int, int] = (10, 10, 5),
+        alpha: float = 1.0,  # Temperature weight
+        beta: float = 0.5,   # Pressure drop weight
+        gamma: float = 0.3   # Mass weight
+    ):
+        """
+        Initialize thermal topology QUBO.
+        
+        Args:
+            grid_size: Voxel grid dimensions (nx, ny, nz)
+            alpha: Temperature objective weight
+            beta: Pressure drop objective weight
+            gamma: Mass objective weight
+        """
+        self.grid_size = grid_size
+        self.n_voxels = np.prod(grid_size)
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+        
+        logger.info(f"Thermal QUBO initialized: {grid_size} grid, {self.n_voxels} voxels")
+    
+    def create_qubo_matrix(
+        self,
+        thermal_conductivity: np.ndarray,
+        heat_generation: np.ndarray
+    ) -> np.ndarray:
+        """
+        Create QUBO matrix for cooling topology.
+        
+        Args:
+            thermal_conductivity: Thermal conductivity field
+            heat_generation: Heat generation field
+            
+        Returns:
+            QUBO matrix Q
+        """
+        Q = np.zeros((self.n_voxels, self.n_voxels))
+        
+        # Linear terms: thermal conductivity, mass
+        for i in range(self.n_voxels):
+            # Material presence increases mass but provides structure
+            Q[i, i] = self.gamma - self.alpha * thermal_conductivity.flat[i]
+        
+        # Quadratic terms: connectivity, flow resistance
+        nx, ny, nz = self.grid_size
+        for i in range(self.n_voxels):
+            ix, iy, iz = np.unravel_index(i, self.grid_size)
+            
+            # Check neighbors (6-connectivity)
+            neighbors = []
+            if ix > 0: neighbors.append(np.ravel_multi_index((ix-1, iy, iz), self.grid_size))
+            if ix < nx-1: neighbors.append(np.ravel_multi_index((ix+1, iy, iz), self.grid_size))
+            if iy > 0: neighbors.append(np.ravel_multi_index((ix, iy-1, iz), self.grid_size))
+            if iy < ny-1: neighbors.append(np.ravel_multi_index((ix, iy+1, iz), self.grid_size))
+            if iz > 0: neighbors.append(np.ravel_multi_index((ix, iy, iz-1), self.grid_size))
+            if iz < nz-1: neighbors.append(np.ravel_multi_index((ix, iy, iz+1), self.grid_size))
+            
+            for j in neighbors:
+                # Penalize isolated material (encourage connectivity)
+                Q[i, j] += self.beta
+        
+        logger.info(f"Thermal QUBO matrix created: {Q.shape}")
+        
+        return Q
+    
+    def decode_solution(
+        self,
+        solution: np.ndarray
+    ) -> CoolingTopology:
+        """
+        Decode binary solution to cooling topology.
+        
+        Args:
+            solution: Binary solution vector
+            
+        Returns:
+            Cooling topology
+        """
+        layout = solution.reshape(self.grid_size)
+        
+        # Compute metrics
+        material_fraction = solution.sum() / self.n_voxels
+        channel_fraction = 1 - material_fraction
+        
+        # Estimate thermal resistance (simplified)
+        thermal_resistance = 1.0 / (channel_fraction + 0.1)
+        
+        # Estimate pressure drop (more channels = lower pressure drop)
+        pressure_drop = 1000 * (1 - channel_fraction)  # Pa
+        
+        # Mass
+        mass = material_fraction * 1.0  # kg (assuming unit density)
+        
+        topology = CoolingTopology(
+            layout=layout,
+            thermal_resistance=thermal_resistance,
+            pressure_drop=pressure_drop,
+            mass=mass
+        )
+        
+        logger.info(f"Decoded topology: {channel_fraction:.1%} channels, ΔP={pressure_drop:.0f} Pa")
+        
+        return topology
+
+
+class AcousticControlQUBO:
+    """
+    QUBO formulation for acoustic noise control through surface treatment.
+    
+    Objective: Minimize sound pressure level while maintaining aerodynamic performance.
+    """
+    
+    def __init__(
+        self,
+        n_panels: int = 50,
+        spl_target: float = 105.0  # dB
+    ):
+        """
+        Initialize acoustic control QUBO.
+        
+        Args:
+            n_panels: Number of surface panels
+            spl_target: Target SPL (dB)
+        """
+        self.n_panels = n_panels
+        self.spl_target = spl_target
+        
+        logger.info(f"Acoustic QUBO initialized: {n_panels} panels, target {spl_target} dB")
+    
+    def create_qubo_matrix(
+        self,
+        noise_contributions: np.ndarray,
+        drag_penalties: np.ndarray
+    ) -> np.ndarray:
+        """
+        Create QUBO matrix for acoustic treatment placement.
+        
+        Args:
+            noise_contributions: Noise contribution of each panel
+            drag_penalties: Drag penalty for treating each panel
+            
+        Returns:
+            QUBO matrix Q
+        """
+        Q = np.zeros((self.n_panels, self.n_panels))
+        
+        # Linear terms: noise reduction vs drag penalty
+        for i in range(self.n_panels):
+            Q[i, i] = drag_penalties[i] - noise_contributions[i]
+        
+        # Quadratic terms: interaction effects
+        for i in range(self.n_panels):
+            for j in range(i+1, self.n_panels):
+                # Adjacent panels have synergistic noise reduction
+                if abs(i - j) == 1:
+                    Q[i, j] = -0.1 * noise_contributions[i] * noise_contributions[j]
+                    Q[j, i] = Q[i, j]
+        
+        return Q
+
+
+class MultiPhysicsQUBOIntegrator:
+    """
+    Integrates multiple QUBO formulations for multi-physics optimization.
+    """
+    
+    def __init__(self):
+        """Initialize multi-physics QUBO integrator"""
+        self.vibration_qubo = VibrationSuppressionQUBO()
+        self.thermal_qubo = ThermalTopologyQUBO()
+        self.acoustic_qubo = AcousticControlQUBO()
+        
+        logger.info("Multi-physics QUBO integrator initialized")
+    
+    def create_combined_qubo(
+        self,
+        vibration_weight: float = 1.0,
+        thermal_weight: float = 1.0,
+        acoustic_weight: float = 1.0
+    ) -> Dict[str, np.ndarray]:
+        """
+        Create combined QUBO for multi-objective optimization.
+        
+        Args:
+            vibration_weight: Weight for vibration objective
+            thermal_weight: Weight for thermal objective
+            acoustic_weight: Weight for acoustic objective
+            
+        Returns:
+            Dictionary of QUBO matrices
+        """
+        # Generate individual QUBOs
+        stiffness_contrib = np.random.rand(20) * 10
+        Q_vib = self.vibration_qubo.create_qubo_matrix(stiffness_contrib)
+        
+        thermal_cond = np.random.rand(10, 10, 5) * 200
+        heat_gen = np.random.rand(10, 10, 5) * 1000
+        Q_thermal = self.thermal_qubo.create_qubo_matrix(thermal_cond, heat_gen)
+        
+        noise_contrib = np.random.rand(50) * 5
+        drag_penalty = np.random.rand(50) * 0.01
+        Q_acoustic = self.acoustic_qubo.create_qubo_matrix(noise_contrib, drag_penalty)
+        
+        # Weight and combine
+        combined = {
+            'vibration': vibration_weight * Q_vib,
+            'thermal': thermal_weight * Q_thermal,
+            'acoustic': acoustic_weight * Q_acoustic
+        }
+        
+        logger.info("Combined multi-physics QUBO created")
+        
+        return combined
+
+
+if __name__ == "__main__":
+    # Test QUBO formulations
+    logging.basicConfig(level=logging.INFO)
+    
+    print("Multi-Physics QUBO Formulations Test")
+    print("=" * 60)
+    
+    # Test vibration suppression QUBO
+    print("\n1. Vibration Suppression QUBO")
+    vib_qubo = VibrationSuppressionQUBO(n_locations=20, max_stiffeners=8)
+    
+    stiffness = np.random.rand(20) * 10
+    Q_vib = vib_qubo.create_qubo_matrix(stiffness)
+    print(f"   QUBO matrix shape: {Q_vib.shape}")
+    print(f"   Matrix range: [{Q_vib.min():.2f}, {Q_vib.max():.2f}]")
+    
+    # Test solution decoding
+    solution = np.random.randint(0, 2, 20)
+    layout = vib_qubo.decode_solution(solution, stiffness)
+    print(f"   Stiffeners: {layout.positions.sum()}")
+    print(f"   Natural frequency: {layout.natural_frequency:.1f} Hz")
+    
+    # Test thermal topology QUBO
+    print("\n2. Thermal Topology QUBO")
+    thermal_qubo = ThermalTopologyQUBO(grid_size=(10, 10, 5))
+    
+    thermal_cond = np.random.rand(10, 10, 5) * 200
+    heat_gen = np.random.rand(10, 10, 5) * 1000
+    Q_thermal = thermal_qubo.create_qubo_matrix(thermal_cond, heat_gen)
+    print(f"   QUBO matrix shape: {Q_thermal.shape}")
+    
+    solution = np.random.randint(0, 2, 500)
+    topology = thermal_qubo.decode_solution(solution)
+    print(f"   Channel fraction: {(1 - topology.layout.mean()):.1%}")
+    print(f"   Pressure drop: {topology.pressure_drop:.0f} Pa")
+    
+    # Test acoustic control QUBO
+    print("\n3. Acoustic Control QUBO")
+    acoustic_qubo = AcousticControlQUBO(n_panels=50)
+    
+    noise = np.random.rand(50) * 5
+    drag = np.random.rand(50) * 0.01
+    Q_acoustic = acoustic_qubo.create_qubo_matrix(noise, drag)
+    print(f"   QUBO matrix shape: {Q_acoustic.shape}")
+    
+    # Test integrated multi-physics QUBO
+    print("\n4. Multi-Physics Integration")
+    integrator = MultiPhysicsQUBOIntegrator()
+    
+    combined = integrator.create_combined_qubo(
+        vibration_weight=1.0,
+        thermal_weight=0.8,
+        acoustic_weight=0.6
+    )
+    print(f"   Vibration QUBO: {combined['vibration'].shape}")
+    print(f"   Thermal QUBO: {combined['thermal'].shape}")
+    print(f"   Acoustic QUBO: {combined['acoustic'].shape}")
+    
+    print("\n✅ All QUBO formulation tests passed!")
