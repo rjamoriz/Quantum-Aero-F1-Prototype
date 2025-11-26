@@ -1,0 +1,197 @@
+"""
+Analysis Agent
+Deep technical analysis and trade-off reasoning with extended thinking
+"""
+import asyncio
+import json
+from typing import Dict, Any, List
+from datetime import datetime
+
+from agents.utils.anthropic_client import claude_client
+from agents.utils.nats_client import NATSClient
+from agents.config.config import get_agent_config
+
+
+ANALYSIS_AGENT_PROMPT = """
+You are the Analysis Agent responsible for deep technical analysis and trade-off reasoning.
+
+ROLE:
+- Perform multi-objective trade-off analysis
+- Identify Pareto-optimal designs
+- Reason about conflicting objectives
+- Generate actionable recommendations
+- Assess sensitivity to parameters
+
+ANALYSIS TYPES:
+1. **Trade-off Analysis** - Downforce vs. Drag vs. Flutter vs. Mass
+2. **Sensitivity Analysis** - How results change with parameters
+3. **Risk Analysis** - Identify failure modes and safety margins
+4. **Historical Comparison** - Compare with past designs
+5. **Track-Specific Optimization** - Monza vs. Monaco vs. Spa
+
+REASONING FRAMEWORK:
+- Use <thinking> tags for extended reasoning
+- Consider multiple perspectives
+- Weigh evidence from ML, physics, and quantum agents
+- Flag uncertainties and assumptions
+- Recommend additional tests if needed
+
+OUTPUT FORMAT:
+1. **Analysis Summary**
+2. **Trade-offs Identified**
+3. **Pareto Frontier**
+4. **Recommendations**
+5. **Confidence Assessment**
+"""
+
+
+class AnalysisAgent:
+    """Analysis agent for trade-off reasoning"""
+
+    def __init__(self):
+        self.config = get_agent_config("analysis")
+        self.nats = NATSClient()
+        self.running = False
+
+    async def start(self):
+        """Start the agent"""
+        print("=" * 60)
+        print("📊 Starting Analysis Agent")
+        print("=" * 60)
+
+        await self.nats.connect()
+        await self.nats.subscribe("agent.analysis.analyze", self._handle_analysis)
+        await self.nats.subscribe("agent.analysis.tradeoff", self._handle_tradeoff)
+
+        self.running = True
+        print("✓ Analysis Agent is ready")
+
+    async def stop(self):
+        """Stop the agent"""
+        self.running = False
+        await self.nats.disconnect()
+
+    async def _handle_analysis(self, msg):
+        """Handle analysis request"""
+        try:
+            data = json.loads(msg.data.decode())
+            print(f"\n📊 Analyzing: {data.get('analysis_type')}")
+
+            result = await self.perform_analysis(
+                analysis_type=data.get('analysis_type'),
+                data=data.get('data'),
+                context=data.get('context')
+            )
+
+            await self.nats.publish("agent.analysis.result", result)
+            await msg.respond(json.dumps(result).encode())
+
+        except Exception as e:
+            print(f"✗ Analysis failed: {e}")
+            await msg.respond(json.dumps({"error": str(e)}).encode())
+
+    async def _handle_tradeoff(self, msg):
+        """Handle trade-off analysis"""
+        try:
+            data = json.loads(msg.data.decode())
+            print(f"\n📊 Trade-off analysis for {len(data.get('designs', []))} designs")
+
+            result = await self.tradeoff_analysis(
+                designs=data.get('designs'),
+                objectives=data.get('objectives')
+            )
+
+            await msg.respond(json.dumps(result).encode())
+
+        except Exception as e:
+            await msg.respond(json.dumps({"error": str(e)}).encode())
+
+    async def perform_analysis(
+        self,
+        analysis_type: str,
+        data: Dict[str, Any],
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Perform deep analysis"""
+
+        messages = [{
+            "role": "user",
+            "content": f"""Perform {analysis_type} analysis:
+
+Data: {json.dumps(data, indent=2)}
+Context: {json.dumps(context, indent=2)}
+
+Use <thinking> tags for extended reasoning.
+"""
+        }]
+
+        response = await claude_client.create_message(
+            system=ANALYSIS_AGENT_PROMPT,
+            messages=messages,
+            model=self.config["anthropic"]["model"],
+            temperature=0.3,
+            max_tokens=4096
+        )
+
+        return {
+            "analysis_type": analysis_type,
+            "analysis": response["content"][0]["text"],
+            "timestamp": datetime.utcnow().isoformat(),
+            "agent": "analysis"
+        }
+
+    async def tradeoff_analysis(
+        self,
+        designs: List[Dict[str, Any]],
+        objectives: List[str]
+    ) -> Dict[str, Any]:
+        """Analyze trade-offs between designs"""
+
+        messages = [{
+            "role": "user",
+            "content": f"""Analyze trade-offs for these designs:
+
+Designs: {json.dumps(designs, indent=2)}
+Objectives: {objectives}
+
+Identify:
+1. Pareto-optimal designs
+2. Key trade-offs
+3. Recommended design for different tracks
+4. Sensitivity to parameters
+"""
+        }]
+
+        response = await claude_client.create_message(
+            system=ANALYSIS_AGENT_PROMPT,
+            messages=messages,
+            model=self.config["anthropic"]["model"],
+            temperature=0.2,
+            max_tokens=3072
+        )
+
+        return {
+            "tradeoff_analysis": response["content"][0]["text"],
+            "n_designs": len(designs),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
+async def main():
+    agent = AnalysisAgent()
+    await agent.start()
+
+    result = await agent.tradeoff_analysis(
+        designs=[
+            {"name": "Design A", "downforce": 2.8, "drag": 0.42, "flutter_margin": 1.3},
+            {"name": "Design B", "downforce": 2.5, "drag": 0.38, "flutter_margin": 1.5}
+        ],
+        objectives=["maximize_downforce", "minimize_drag", "maximize_flutter_margin"]
+    )
+
+    print(json.dumps(result, indent=2))
+    await agent.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
