@@ -721,7 +721,7 @@ Subject to:
 **Objective**: Minimize vibration amplitude while maintaining stiffness
 
 $$
-H_{QUBO} = \sum_{i=1}^{N} w_i x_i + \sum_{i<j} J_{ij} x_i x_j
+H_{QUBO} = \sum_{i=1}^{N} w_i x_i + \sum_{i \lt j} J_{ij} x_i x_j
 $$
 
 Where:
@@ -750,7 +750,7 @@ $$
 **QUBO Encoding**:
 
 $$
-H = \sum_i h_i x_i + \sum_{i<j} J_{ij} x_i x_j
+H = \sum_i h_i x_i + \sum_{i \lt j} J_{ij} x_i x_j
 $$
 
 Where:
