@@ -14,12 +14,14 @@ import VQEOptimizationPanel from './components/VQEOptimizationPanel';
 import DWaveAnnealingDashboard from './components/DWaveAnnealingDashboard';
 import GenerativeDesignStudio from './components/GenerativeDesignStudio';
 import EvolutionProgressTracker from './components/EvolutionProgressTracker';
+import RealTimeSimulation from './components/RealTimeSimulation';
 
 function App() {
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('realtime');
   const [visualizationData, setVisualizationData] = useState(null);
 
   const tabs = [
+    { id: 'realtime', label: 'Real-Time Simulation', icon: '⚡' },
     { id: 'overview', label: 'Overview', icon: '📊' },
     { id: 'aerotransformer', label: 'AeroTransformer', icon: '🚀' },
     { id: 'gnnrans', label: 'GNN-RANS', icon: '🔬' },
@@ -97,6 +99,12 @@ function App() {
 
         {/* Tab Content */}
         <div className="transition-all duration-300">
+          {activeTab === 'realtime' && (
+            <div className="animate-fadeIn">
+              <RealTimeSimulation />
+            </div>
+          )}
+
           {activeTab === 'overview' && (
             <div className="animate-fadeIn">
               <EvolutionProgressTracker />
