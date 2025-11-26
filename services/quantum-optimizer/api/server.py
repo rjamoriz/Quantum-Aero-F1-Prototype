@@ -1,0 +1,320 @@
+"""
+Quantum Optimizer Service - FastAPI Server
+QAOA and classical optimization for aerodynamic design
+"""
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict
+import numpy as np
+import sys
+import os
+import logging
+
+# Add parent directory to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from qaoa.solver import QAOASolver, create_qubo_from_problem
+from classical.simulated_annealing import SimulatedAnnealing, GeneticAlgorithm, HybridOptimizer
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="Quantum Optimizer API",
+    description="QAOA and classical optimization for aerodynamic design",
+    version="1.0.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Global optimizer instances
+qaoa_solver = None
+classical_solver = None
+
+
+# Request/Response Models
+class OptimizationRequest(BaseModel):
+    """Optimization request"""
+    objective: Dict = Field(..., description="Objective function specification")
+    constraints: Optional[Dict] = Field(None, description="Constraint specification")
+    method: str = Field("auto", description="Method: 'qaoa', 'classical', or 'auto'")
+    n_layers: int = Field(3, ge=1, le=10, description="QAOA layers (if using QAOA)")
+
+
+class OptimizationResponse(BaseModel):
+    """Optimization response"""
+    solution: List[int] = Field(..., description="Binary solution vector")
+    cost: float = Field(..., description="Objective function value")
+    method: str = Field(..., description="Method used")
+    iterations: int = Field(..., description="Number of iterations")
+    success: bool = Field(..., description="Whether optimization succeeded")
+    computation_time_ms: float = Field(..., description="Computation time")
+
+
+class QUBORequest(BaseModel):
+    """QUBO problem request"""
+    qubo_matrix: List[List[float]] = Field(..., description="QUBO matrix Q")
+    constraints: Optional[Dict] = Field(None, description="Constraints")
+    method: str = Field("auto", description="Optimization method")
+
+
+class HealthResponse(BaseModel):
+    """Health check response"""
+    status: str
+    service: str
+    version: str
+    quantum_available: bool
+    classical_available: bool
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize optimizers on startup"""
+    global qaoa_solver, classical_solver
+    
+    logger.info("Starting Quantum Optimizer Service...")
+    
+    try:
+        # Initialize QAOA solver
+        qaoa_solver = QAOASolver(n_layers=3, optimizer='COBYLA')
+        logger.info("QAOA solver initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize QAOA: {e}")
+        qaoa_solver = None
+    
+    try:
+        # Initialize classical solver
+        classical_solver = HybridOptimizer()
+        logger.info("Classical solver initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize classical solver: {e}")
+        classical_solver = None
+    
+    logger.info("Quantum Optimizer Service ready")
+
+
+@app.get("/", response_model=Dict[str, str])
+async def root():
+    """Root endpoint"""
+    return {
+        "service": "Quantum Optimizer API",
+        "version": "1.0.0",
+        "status": "operational"
+    }
+
+
+@app.get("/health", response_model=HealthResponse)
+async def health_check():
+    """Health check endpoint"""
+    return HealthResponse(
+        status="healthy",
+        service="quantum-optimizer",
+        version="1.0.0",
+        quantum_available=qaoa_solver is not None,
+        classical_available=classical_solver is not None
+    )
+
+
+@app.post("/optimize", response_model=OptimizationResponse)
+async def optimize(request: OptimizationRequest):
+    """
+    Optimize aerodynamic design problem.
+    
+    Automatically selects best method (QAOA or classical)
+    based on problem size and available resources.
+    """
+    import time
+    start_time = time.time()
+    
+    try:
+        # Create QUBO matrix from problem
+        qubo_matrix = create_qubo_from_problem(
+            request.objective,
+            request.constraints
+        )
+        
+        n_variables = qubo_matrix.shape[0]
+        logger.info(f"Optimization request: {n_variables} variables, method={request.method}")
+        
+        # Select method
+        if request.method == "auto":
+            # Use QAOA for small problems, classical for large
+            method = "qaoa" if n_variables <= 20 and qaoa_solver is not None else "classical"
+        else:
+            method = request.method
+        
+        # Optimize
+        if method == "qaoa":
+            if qaoa_solver is None:
+                raise HTTPException(status_code=503, detail="QAOA solver not available")
+            
+            result = qaoa_solver.optimize(qubo_matrix, request.constraints)
+            
+        elif method == "classical":
+            if classical_solver is None:
+                raise HTTPException(status_code=503, detail="Classical solver not available")
+            
+            def cost_fn(x): return x @ qubo_matrix @ x
+            result = classical_solver.optimize(cost_fn, n_variables, request.constraints)
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown method: {method}")
+        
+        # Compute time
+        computation_time = (time.time() - start_time) * 1000
+        
+        logger.info(f"Optimization completed: cost={result.cost:.4f}, time={computation_time:.2f}ms")
+        
+        return OptimizationResponse(
+            solution=result.solution.tolist(),
+            cost=result.cost,
+            method=result.method,
+            iterations=result.n_iterations if hasattr(result, 'n_iterations') else result.iterations,
+            success=result.success,
+            computation_time_ms=computation_time
+        )
+        
+    except Exception as e:
+        logger.error(f"Optimization error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/qubo", response_model=OptimizationResponse)
+async def solve_qubo(request: QUBORequest):
+    """
+    Solve QUBO problem directly.
+    
+    Accepts QUBO matrix and solves using specified method.
+    """
+    import time
+    start_time = time.time()
+    
+    try:
+        # Convert to numpy array
+        qubo_matrix = np.array(request.qubo_matrix)
+        n_variables = qubo_matrix.shape[0]
+        
+        logger.info(f"QUBO request: {n_variables} variables")
+        
+        # Select method
+        if request.method == "auto":
+            method = "qaoa" if n_variables <= 20 and qaoa_solver is not None else "classical"
+        else:
+            method = request.method
+        
+        # Solve
+        if method == "qaoa":
+            if qaoa_solver is None:
+                raise HTTPException(status_code=503, detail="QAOA solver not available")
+            result = qaoa_solver.optimize(qubo_matrix, request.constraints)
+            
+        elif method == "classical":
+            if classical_solver is None:
+                raise HTTPException(status_code=503, detail="Classical solver not available")
+            
+            sa = SimulatedAnnealing()
+            result = sa.optimize_qubo(qubo_matrix, request.constraints)
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown method: {method}")
+        
+        computation_time = (time.time() - start_time) * 1000
+        
+        return OptimizationResponse(
+            solution=result.solution.tolist(),
+            cost=result.cost,
+            method=result.method,
+            iterations=result.n_iterations if hasattr(result, 'n_iterations') else result.iterations,
+            success=result.success,
+            computation_time_ms=computation_time
+        )
+        
+    except Exception as e:
+        logger.error(f"QUBO solve error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/qaoa")
+async def run_qaoa(request: QUBORequest):
+    """
+    Run QAOA specifically (force quantum method).
+    """
+    if qaoa_solver is None:
+        raise HTTPException(status_code=503, detail="QAOA solver not available")
+    
+    request.method = "qaoa"
+    return await solve_qubo(request)
+
+
+@app.post("/classical")
+async def run_classical(request: QUBORequest):
+    """
+    Run classical optimization specifically.
+    """
+    if classical_solver is None:
+        raise HTTPException(status_code=503, detail="Classical solver not available")
+    
+    request.method = "classical"
+    return await solve_qubo(request)
+
+
+@app.get("/methods")
+async def list_methods():
+    """
+    List available optimization methods.
+    """
+    methods = []
+    
+    if qaoa_solver is not None:
+        methods.append({
+            "name": "QAOA",
+            "type": "quantum",
+            "description": "Quantum Approximate Optimization Algorithm",
+            "max_variables": 20,
+            "status": "available"
+        })
+    
+    if classical_solver is not None:
+        methods.append({
+            "name": "Simulated Annealing",
+            "type": "classical",
+            "description": "Classical simulated annealing optimizer",
+            "max_variables": 1000,
+            "status": "available"
+        })
+        
+        methods.append({
+            "name": "Genetic Algorithm",
+            "type": "classical",
+            "description": "Classical genetic algorithm optimizer",
+            "max_variables": 1000,
+            "status": "available"
+        })
+    
+    return {
+        "methods": methods,
+        "auto_selection": True
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    # Run server
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8002,
+        log_level="info"
+    )
