@@ -1,0 +1,927 @@
+# Synthetic Data Generation & 3D Visualization for F1 Quantum-Aero
+
+**Document Version**: 1.0  
+**Date**: November 26, 2025  
+**Status**: Technical Specification
+
+---
+
+## 📋 Table of Contents
+
+1. [Overview](#overview)
+2. [F1 Aerodynamic Surfaces & NACA Airfoils](#f1-aerodynamic-surfaces--naca-airfoils)
+3. [Synthetic Data Generation](#synthetic-data-generation)
+4. [3D Visualization System](#3d-visualization-system)
+5. [Data Pipeline Architecture](#data-pipeline-architecture)
+6. [Implementation Roadmap](#implementation-roadmap)
+
+---
+
+## 🎯 1. Overview
+
+### Purpose
+
+This document specifies:
+- **F1-specific aerodynamic surfaces** based on NACA airfoil profiles
+- **Synthetic data generation** for ML training
+- **3D visualization system** for real-time aerodynamic analysis
+- **Complete data pipeline** from geometry to visualization
+
+### Key Requirements
+
+1. **Accurate F1 Geometry**
+   - Front wing (multi-element NACA profiles)
+   - Rear wing (high-downforce configurations)
+   - Floor and diffuser (ground effect)
+   - Sidepods and bargeboards
+   - DRS system
+
+2. **Synthetic Data Generation**
+   - 10,000+ training samples
+   - Physics-based simulation (VLM, CFD)
+   - Parametric variation
+   - Augmentation strategies
+
+3. **3D Visualization**
+   - Real-time pressure distribution
+   - Streamlines and vortex visualization
+   - Interactive geometry manipulation
+   - Performance dashboards
+
+---
+
+## 🏎️ 2. F1 Aerodynamic Surfaces & NACA Airfoils
+
+### 2.1 Front Wing
+
+#### NACA Profiles Used in F1
+
+**Main Plane**:
+- **NACA 6412** (Modified): High camber for maximum downforce
+  - 6% camber at 40% chord
+  - 12% thickness
+  - Typical chord: 200-300mm
+  - Angle of attack: 15-25°
+
+**Flap Elements** (2-3 elements):
+- **NACA 4415** (Modified): Flap element
+  - 4% camber at 40% chord
+  - 15% thickness
+  - Chord: 100-150mm
+  - Slot gaps: 10-20mm
+
+**Endplates**:
+- Vertical surfaces with NACA 0012 profile
+- Height: 200-250mm
+- Thickness: 12%
+
+#### Geometry Parameters
+
+```python
+front_wing_params = {
+    'main_plane': {
+        'profile': 'NACA 6412 Modified',
+        'chord': 0.25,  # meters
+        'span': 1.8,    # meters (FIA max width)
+        'twist': -5.0,  # degrees (washout)
+        'aoa': 20.0,    # degrees
+        'z_position': 0.05  # ground clearance
+    },
+    'flap_1': {
+        'profile': 'NACA 4415',
+        'chord': 0.12,
+        'span': 1.8,
+        'aoa': 25.0,
+        'slot_gap': 0.015,
+        'overlap': 0.02
+    },
+    'flap_2': {
+        'profile': 'NACA 4418',
+        'chord': 0.10,
+        'span': 1.8,
+        'aoa': 30.0,
+        'slot_gap': 0.012,
+        'overlap': 0.015
+    },
+    'endplates': {
+        'profile': 'NACA 0012',
+        'height': 0.22,
+        'thickness': 0.012
+    }
+}
+```
+
+### 2.2 Rear Wing
+
+#### NACA Profiles
+
+**Main Plane**:
+- **NACA 9618** (Modified): Very high camber
+  - 9% camber at 60% chord
+  - 18% thickness
+  - Chord: 300-400mm
+  - AOA: 10-15°
+
+**DRS Flap**:
+- **NACA 6412**: Adjustable element
+  - Closed: 25° AOA
+  - Open (DRS): 0° AOA
+  - Activation: 0.3 seconds
+
+#### Geometry Parameters
+
+```python
+rear_wing_params = {
+    'main_plane': {
+        'profile': 'NACA 9618 Modified',
+        'chord': 0.35,
+        'span': 0.75,  # FIA regulation
+        'aoa': 12.0,
+        'z_position': 0.95  # height above ground
+    },
+    'drs_flap': {
+        'profile': 'NACA 6412',
+        'chord': 0.20,
+        'span': 0.75,
+        'aoa_closed': 25.0,
+        'aoa_open': 0.0,
+        'slot_gap': 0.020
+    },
+    'endplates': {
+        'profile': 'NACA 0015',
+        'height': 0.30,
+        'thickness': 0.015
+    }
+}
+```
+
+### 2.3 Floor and Diffuser
+
+#### Profiles
+
+**Floor Leading Edge**:
+- **NACA 0009**: Thin, symmetric
+  - Smooth entry for underbody flow
+  - Thickness: 9%
+
+**Diffuser Ramps**:
+- **Modified NACA 23012**: Cambered for expansion
+  - 2% camber at 30% chord
+  - 12% thickness
+  - Expansion angle: 12-18°
+
+#### Geometry Parameters
+
+```python
+floor_diffuser_params = {
+    'floor': {
+        'length': 3.5,  # meters
+        'width': 1.6,
+        'leading_edge_profile': 'NACA 0009',
+        'ride_height_front': 0.015,  # 15mm
+        'ride_height_rear': 0.050    # 50mm
+    },
+    'diffuser': {
+        'profile': 'NACA 23012 Modified',
+        'length': 1.0,
+        'expansion_angle': 15.0,  # degrees
+        'channels': 3,  # central + 2 side channels
+        'exit_height': 0.30
+    },
+    'vortex_generators': {
+        'profile': 'NACA 0006',
+        'height': 0.020,
+        'spacing': 0.100,
+        'angle': 15.0
+    }
+}
+```
+
+### 2.4 Complete F1 Car Geometry
+
+```python
+f1_car_geometry = {
+    'front_wing': front_wing_params,
+    'rear_wing': rear_wing_params,
+    'floor_diffuser': floor_diffuser_params,
+    
+    'sidepods': {
+        'profile': 'NACA 0012 Modified',
+        'length': 2.0,
+        'max_width': 0.40,
+        'inlet_area': 0.15  # m²
+    },
+    
+    'bargeboards': {
+        'profile': 'NACA 0008',
+        'height': 0.30,
+        'length': 0.60,
+        'angle': 25.0
+    },
+    
+    'beam_wing': {
+        'profile': 'NACA 4412',
+        'chord': 0.15,
+        'span': 0.75,
+        'aoa': 15.0
+    }
+}
+```
+
+---
+
+## 🔬 3. Synthetic Data Generation
+
+### 3.1 Data Generation Pipeline
+
+#### Overview
+
+```
+Geometry Generation → VLM/CFD Simulation → Feature Extraction → Dataset Storage
+        ↓                    ↓                      ↓                  ↓
+   Parametric          Pressure/Forces        Dimensionless         HDF5/NPY
+   Variation           Streamlines            Coefficients          MongoDB
+```
+
+#### Target Dataset Size
+
+- **Training Set**: 10,000 samples
+- **Validation Set**: 2,000 samples
+- **Test Set**: 1,000 samples
+- **Total**: 13,000 samples
+
+### 3.2 Parametric Variation Strategy
+
+#### Design Variables
+
+```python
+design_space = {
+    # Front Wing
+    'front_wing_aoa': (15, 25),        # degrees
+    'front_wing_flap1_aoa': (20, 30),
+    'front_wing_flap2_aoa': (25, 35),
+    'front_wing_ride_height': (0.03, 0.08),  # meters
+    
+    # Rear Wing
+    'rear_wing_aoa': (8, 16),
+    'rear_wing_flap_aoa': (20, 30),
+    'drs_state': [0, 1],  # closed/open
+    
+    # Floor/Diffuser
+    'floor_ride_height_front': (0.010, 0.025),
+    'floor_ride_height_rear': (0.040, 0.070),
+    'diffuser_angle': (12, 18),
+    
+    # Flow Conditions
+    'velocity': (30, 90),  # m/s (108-324 km/h)
+    'yaw_angle': (-10, 10),  # degrees
+    'pitch_angle': (-2, 2),
+    'roll_angle': (-1, 1),
+    
+    # Track Conditions
+    'ground_effect': [True, False],
+    'ride_height_variation': (0, 0.020),  # suspension travel
+}
+```
+
+#### Sampling Strategy
+
+**Latin Hypercube Sampling (LHS)**:
+```python
+import numpy as np
+from scipy.stats import qmc
+
+def generate_samples(n_samples=10000):
+    """Generate LHS samples for design space"""
+    n_vars = 15  # number of design variables
+    
+    sampler = qmc.LatinHypercube(d=n_vars)
+    samples = sampler.random(n=n_samples)
+    
+    # Scale to actual ranges
+    scaled_samples = scale_samples(samples, design_space)
+    
+    return scaled_samples
+```
+
+### 3.3 Physics-Based Simulation
+
+#### VLM Simulation (Fast)
+
+**For each sample**:
+1. Generate geometry from parameters
+2. Create VLM mesh (20x10 panels per surface)
+3. Solve for pressure distribution
+4. Compute forces and moments
+5. Extract features
+
+**Computational Cost**: ~1 second per sample
+**Total Time**: ~3 hours for 10,000 samples
+
+```python
+def generate_vlm_data(sample):
+    """Generate single VLM data sample"""
+    # Create geometry
+    geometry = create_f1_geometry(sample)
+    
+    # VLM solve
+    vlm = VortexLatticeMethod(n_panels_x=20, n_panels_y=10)
+    vlm.setup_geometry(geometry)
+    result = vlm.solve(
+        velocity=sample['velocity'],
+        alpha=sample['pitch_angle'],
+        yaw=sample['yaw_angle']
+    )
+    
+    # Extract features
+    features = {
+        'cl': result.cl,
+        'cd': result.cd,
+        'cm': result.cm,
+        'pressure': result.pressure,
+        'cl_front': compute_front_downforce(result),
+        'cl_rear': compute_rear_downforce(result),
+        'balance': compute_aero_balance(result),
+        'l_over_d': result.cl / result.cd
+    }
+    
+    return features
+```
+
+#### CFD Simulation (High-Fidelity)
+
+**Subset of samples** (1,000 high-fidelity):
+- OpenFOAM RANS simulation
+- k-omega SST turbulence model
+- 2-5 million cells
+- ~30 minutes per sample
+
+```python
+def generate_cfd_data(sample):
+    """Generate high-fidelity CFD data"""
+    # Create OpenFOAM case
+    case = create_openfoam_case(sample)
+    
+    # Run simulation
+    run_openfoam(case, n_processors=8)
+    
+    # Post-process
+    features = extract_cfd_features(case)
+    
+    return features
+```
+
+### 3.4 Data Augmentation
+
+#### Geometric Augmentation
+
+```python
+def augment_geometry(geometry, augmentation_params):
+    """Apply geometric augmentation"""
+    augmentations = {
+        'noise': add_surface_noise(geometry, std=0.001),
+        'deformation': apply_elastic_deformation(geometry, alpha=0.01),
+        'scaling': scale_geometry(geometry, factor=(0.98, 1.02)),
+        'rotation': rotate_geometry(geometry, angle=(-1, 1))
+    }
+    
+    return augmentations
+```
+
+#### Flow Condition Augmentation
+
+```python
+def augment_flow_conditions(conditions):
+    """Augment flow conditions"""
+    augmented = {
+        'velocity': conditions['velocity'] * np.random.uniform(0.95, 1.05),
+        'yaw': conditions['yaw'] + np.random.uniform(-0.5, 0.5),
+        'turbulence_intensity': np.random.uniform(0.01, 0.05)
+    }
+    
+    return augmented
+```
+
+### 3.5 Dataset Structure
+
+#### HDF5 Format
+
+```python
+dataset_structure = {
+    'geometry': {
+        'mesh_coordinates': (n_samples, n_nodes, 3),  # x, y, z
+        'mesh_connectivity': (n_samples, n_elements, 4),
+        'surface_normals': (n_samples, n_nodes, 3),
+        'design_parameters': (n_samples, n_params)
+    },
+    
+    'flow_conditions': {
+        'velocity': (n_samples,),
+        'alpha': (n_samples,),
+        'yaw': (n_samples,),
+        'reynolds_number': (n_samples,)
+    },
+    
+    'aerodynamic_outputs': {
+        'pressure_coefficient': (n_samples, n_nodes),
+        'cl': (n_samples,),
+        'cd': (n_samples,),
+        'cm': (n_samples,),
+        'cl_front': (n_samples,),
+        'cl_rear': (n_samples,),
+        'balance': (n_samples,)
+    },
+    
+    'metadata': {
+        'simulation_method': (n_samples,),  # 'VLM' or 'CFD'
+        'timestamp': (n_samples,),
+        'convergence': (n_samples,)
+    }
+}
+```
+
+#### MongoDB Schema
+
+```javascript
+{
+  _id: ObjectId,
+  simulation_id: String,
+  timestamp: Date,
+  
+  geometry: {
+    design_parameters: Object,
+    mesh_file: String,  // Reference to HDF5
+    surface_area: Number
+  },
+  
+  flow_conditions: {
+    velocity: Number,
+    alpha: Number,
+    yaw: Number,
+    reynolds: Number
+  },
+  
+  results: {
+    cl: Number,
+    cd: Number,
+    cm: Number,
+    cl_front: Number,
+    cl_rear: Number,
+    balance: Number,
+    l_over_d: Number
+  },
+  
+  simulation: {
+    method: String,  // 'VLM', 'CFD', 'ML'
+    convergence: Boolean,
+    iterations: Number,
+    compute_time: Number
+  },
+  
+  tags: [String],
+  notes: String
+}
+```
+
+---
+
+## 🎨 4. 3D Visualization System
+
+### 4.1 Technology Stack
+
+**Frontend**:
+- **Three.js**: 3D rendering engine
+- **VTK.js**: Scientific visualization
+- **React Three Fiber**: React integration
+- **Plotly.js**: 2D charts and plots
+
+**Backend**:
+- **WebSocket**: Real-time updates
+- **Binary data transfer**: Efficient mesh streaming
+
+### 4.2 Visualization Components
+
+#### 4.2.1 Geometry Viewer
+
+**Features**:
+- Interactive 3D model rotation
+- Zoom and pan
+- Multiple view angles (front, side, top, isometric)
+- Wireframe/solid toggle
+- Component isolation (show/hide wings, floor, etc.)
+
+```javascript
+// React Three Fiber Component
+function F1CarViewer({ geometry, pressureData }) {
+  return (
+    <Canvas camera={{ position: [5, 2, 5], fov: 50 }}>
+      <ambientLight intensity={0.5} />
+      <pointLight position={[10, 10, 10]} />
+      
+      {/* Front Wing */}
+      <FrontWing 
+        geometry={geometry.front_wing}
+        pressure={pressureData.front_wing}
+        colorMap="jet"
+      />
+      
+      {/* Rear Wing */}
+      <RearWing 
+        geometry={geometry.rear_wing}
+        pressure={pressureData.rear_wing}
+      />
+      
+      {/* Floor and Diffuser */}
+      <FloorDiffuser 
+        geometry={geometry.floor}
+        pressure={pressureData.floor}
+      />
+      
+      {/* Ground Plane */}
+      <GroundPlane />
+      
+      <OrbitControls />
+    </Canvas>
+  );
+}
+```
+
+#### 4.2.2 Pressure Distribution
+
+**Color Maps**:
+- **Jet**: Blue (low pressure) → Red (high pressure)
+- **Viridis**: Perceptually uniform
+- **Custom F1**: Team-specific colors
+
+**Features**:
+- Real-time pressure coefficient (Cp) display
+- Contour lines
+- Value labels on hover
+- Min/max indicators
+
+```javascript
+function PressureVisualization({ mesh, pressure }) {
+  const colorMap = useMemo(() => {
+    return createColorMap(pressure, {
+      min: -3.0,  // Suction peak
+      max: 1.0,   // Stagnation
+      scheme: 'jet'
+    });
+  }, [pressure]);
+  
+  return (
+    <mesh geometry={mesh}>
+      <meshStandardMaterial 
+        vertexColors
+        colors={colorMap}
+      />
+    </mesh>
+  );
+}
+```
+
+#### 4.2.3 Streamlines and Vortices
+
+**Visualization**:
+- Particle traces
+- Streamlines (LIC - Line Integral Convolution)
+- Vortex cores (Q-criterion, λ2-criterion)
+- Wake visualization
+
+```javascript
+function StreamlineVisualization({ velocityField }) {
+  const [particles, setParticles] = useState([]);
+  
+  useEffect(() => {
+    // Seed particles
+    const seeds = generateSeedPoints(100);
+    
+    // Integrate streamlines
+    const lines = seeds.map(seed => 
+      integrateStreamline(seed, velocityField)
+    );
+    
+    setParticles(lines);
+  }, [velocityField]);
+  
+  return (
+    <group>
+      {particles.map((line, i) => (
+        <Line 
+          key={i}
+          points={line}
+          color="white"
+          lineWidth={2}
+        />
+      ))}
+    </group>
+  );
+}
+```
+
+#### 4.2.4 Force Vectors
+
+**Display**:
+- Downforce arrows (front/rear)
+- Drag arrow
+- Side force
+- Moment indicators
+- Center of pressure
+
+```javascript
+function ForceVectors({ forces }) {
+  return (
+    <group>
+      {/* Downforce - Front */}
+      <Arrow
+        start={[1.5, 0.5, 0]}
+        end={[1.5, 0.5 - forces.cl_front * 0.5, 0]}
+        color="blue"
+        label={`Front: ${forces.cl_front.toFixed(2)}`}
+      />
+      
+      {/* Downforce - Rear */}
+      <Arrow
+        start={[-1.5, 0.5, 0]}
+        end={[-1.5, 0.5 - forces.cl_rear * 0.5, 0]}
+        color="red"
+        label={`Rear: ${forces.cl_rear.toFixed(2)}`}
+      />
+      
+      {/* Drag */}
+      <Arrow
+        start={[0, 0.5, 0]}
+        end={[-forces.cd * 0.5, 0.5, 0]}
+        color="orange"
+        label={`Drag: ${forces.cd.toFixed(3)}`}
+      />
+    </group>
+  );
+}
+```
+
+### 4.3 Interactive Controls
+
+#### Parameter Sliders
+
+```javascript
+function AeroControls({ onParameterChange }) {
+  return (
+    <div className="controls-panel">
+      <Slider
+        label="Front Wing AOA"
+        min={15}
+        max={25}
+        step={0.5}
+        value={frontWingAOA}
+        onChange={(v) => onParameterChange('front_wing_aoa', v)}
+      />
+      
+      <Slider
+        label="Rear Wing AOA"
+        min={8}
+        max={16}
+        step={0.5}
+        value={rearWingAOA}
+        onChange={(v) => onParameterChange('rear_wing_aoa', v)}
+      />
+      
+      <Toggle
+        label="DRS"
+        checked={drsOpen}
+        onChange={(v) => onParameterChange('drs_state', v)}
+      />
+      
+      <Slider
+        label="Ride Height (Front)"
+        min={10}
+        max={25}
+        step={1}
+        unit="mm"
+        value={rideHeightFront}
+        onChange={(v) => onParameterChange('ride_height_front', v / 1000)}
+      />
+    </div>
+  );
+}
+```
+
+### 4.4 Performance Dashboard
+
+```javascript
+function PerformanceDashboard({ results }) {
+  return (
+    <div className="dashboard">
+      {/* Key Metrics */}
+      <MetricCard
+        title="Total Downforce"
+        value={results.cl}
+        unit="CL"
+        trend={results.cl_trend}
+      />
+      
+      <MetricCard
+        title="Drag"
+        value={results.cd}
+        unit="CD"
+        trend={results.cd_trend}
+      />
+      
+      <MetricCard
+        title="L/D Ratio"
+        value={results.l_over_d}
+        trend={results.ld_trend}
+      />
+      
+      <MetricCard
+        title="Aero Balance"
+        value={results.balance}
+        unit="%"
+        optimal={[45, 55]}
+      />
+      
+      {/* Charts */}
+      <LineChart
+        title="Downforce vs Speed"
+        data={results.speed_sweep}
+        xAxis="velocity"
+        yAxis="cl"
+      />
+      
+      <PolarChart
+        title="Yaw Sensitivity"
+        data={results.yaw_sweep}
+      />
+    </div>
+  );
+}
+```
+
+---
+
+## 🔄 5. Data Pipeline Architecture
+
+### 5.1 Complete Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Data Generation Pipeline                  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  1. Geometry Generation                                      │
+│     - NACA airfoil profiles                                  │
+│     - Parametric F1 surfaces                                 │
+│     - Mesh generation                                        │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  2. Simulation (Parallel)                                    │
+│     ├─ VLM (10,000 samples) ──────────► 3 hours             │
+│     └─ CFD (1,000 samples) ───────────► 500 hours           │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  3. Feature Extraction                                       │
+│     - Pressure coefficients                                  │
+│     - Force coefficients                                     │
+│     - Derived quantities                                     │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  4. Data Storage                                             │
+│     ├─ HDF5 (mesh + pressure)                               │
+│     ├─ MongoDB (metadata + results)                         │
+│     └─ Redis (cache)                                        │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  5. ML Training                                              │
+│     - PyTorch DataLoader                                     │
+│     - GPU training                                           │
+│     - ONNX export                                           │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  6. Visualization                                            │
+│     - Three.js rendering                                     │
+│     - Real-time updates                                      │
+│     - Interactive controls                                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 5.2 Implementation Scripts
+
+#### Data Generation Script
+
+```python
+# scripts/data-preprocessing/generate_dataset.py
+
+import numpy as np
+from pathlib import Path
+import h5py
+from tqdm import tqdm
+import multiprocessing as mp
+
+def generate_complete_dataset(
+    n_samples=10000,
+    output_dir='data/training-datasets',
+    n_workers=8
+):
+    """Generate complete synthetic dataset"""
+    
+    print(f"Generating {n_samples} samples...")
+    
+    # Generate design samples
+    samples = generate_samples(n_samples)
+    
+    # Parallel simulation
+    with mp.Pool(n_workers) as pool:
+        results = list(tqdm(
+            pool.imap(generate_vlm_data, samples),
+            total=n_samples
+        ))
+    
+    # Save to HDF5
+    output_file = Path(output_dir) / 'f1_aero_dataset.h5'
+    save_to_hdf5(samples, results, output_file)
+    
+    # Save metadata to MongoDB
+    save_to_mongodb(samples, results)
+    
+    print(f"Dataset saved to {output_file}")
+    print(f"Total size: {output_file.stat().st_size / 1e9:.2f} GB")
+
+if __name__ == "__main__":
+    generate_complete_dataset()
+```
+
+---
+
+## 📅 6. Implementation Roadmap
+
+### Phase 1: Geometry & Data Generation (Week 1-2)
+
+- [ ] Implement NACA airfoil generator
+- [ ] Create F1 surface parametrization
+- [ ] Build mesh generation pipeline
+- [ ] Generate 10,000 VLM samples
+- [ ] Generate 1,000 CFD samples
+- [ ] Store in HDF5 + MongoDB
+
+### Phase 2: ML Training (Week 3-4)
+
+- [ ] Implement PyTorch DataLoader
+- [ ] Train GeoConvNet surrogate
+- [ ] Validate on test set
+- [ ] Export to ONNX
+- [ ] Deploy to ML service
+
+### Phase 3: 3D Visualization (Week 5-6)
+
+- [ ] Implement Three.js viewer
+- [ ] Add pressure visualization
+- [ ] Add streamline rendering
+- [ ] Add force vectors
+- [ ] Create interactive controls
+- [ ] Build performance dashboard
+
+### Phase 4: Integration (Week 7-8)
+
+- [ ] Connect frontend to backend
+- [ ] Real-time simulation updates
+- [ ] WebSocket streaming
+- [ ] Optimization workflow
+- [ ] User testing
+
+---
+
+## 📊 Success Metrics
+
+### Data Quality
+
+- **Coverage**: 95% of design space sampled
+- **Accuracy**: VLM within 10% of CFD
+- **Diversity**: Low correlation between samples
+
+### Visualization Performance
+
+- **Frame Rate**: 60 FPS for 3D rendering
+- **Latency**: < 100ms for parameter updates
+- **Responsiveness**: Smooth interaction
+
+### User Experience
+
+- **Learning Curve**: < 5 minutes to basic proficiency
+- **Insights**: Clear aerodynamic understanding
+- **Productivity**: 10x faster than traditional tools
+
+---
+
+**This specification ensures complete F1-specific implementation with accurate NACA airfoils, comprehensive synthetic data generation, and professional 3D visualization!**
