@@ -1,0 +1,310 @@
+"""
+ML Surrogate Service - FastAPI Server
+GPU-accelerated aerodynamic predictions using ONNX Runtime
+"""
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict
+import numpy as np
+import sys
+import os
+import logging
+
+# Add parent directory to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Note: Predictor will be initialized when model is available
+# from inference.predictor import AeroPredictor, PredictorCache
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="ML Surrogate API",
+    description="GPU-accelerated aerodynamic predictions using ML surrogates",
+    version="1.0.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Global predictor instance (will be initialized on startup)
+predictor = None
+cache = None
+
+
+# Request/Response Models
+class PredictionRequest(BaseModel):
+    """ML prediction request"""
+    mesh_id: str = Field(..., description="Mesh identifier")
+    parameters: Dict[str, float] = Field(..., description="Flow parameters")
+    use_cache: bool = Field(True, description="Use cached results if available")
+    return_confidence: bool = Field(True, description="Return confidence score")
+
+
+class PredictionResponse(BaseModel):
+    """ML prediction response"""
+    cl: float = Field(..., description="Lift coefficient")
+    cd: float = Field(..., description="Drag coefficient")
+    cm: float = Field(0.0, description="Moment coefficient")
+    confidence: float = Field(..., description="Prediction confidence [0-1]")
+    inference_time_ms: float = Field(..., description="Inference time in milliseconds")
+    cached: bool = Field(..., description="Whether result was cached")
+    gpu_used: bool = Field(..., description="Whether GPU was used")
+
+
+class BatchPredictionRequest(BaseModel):
+    """Batch prediction request"""
+    requests: List[PredictionRequest] = Field(..., description="List of prediction requests")
+    batch_size: int = Field(32, ge=1, le=128, description="Batch size for processing")
+
+
+class ModelInfo(BaseModel):
+    """Model information"""
+    name: str
+    type: str
+    parameters: int
+    input_shape: List[int]
+    output_shape: List[int]
+    device: str
+    status: str
+
+
+class HealthResponse(BaseModel):
+    """Health check response"""
+    status: str
+    service: str
+    version: str
+    gpu_available: bool
+    model_loaded: bool
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize predictor on startup"""
+    global predictor, cache
+    
+    logger.info("Starting ML Surrogate Service...")
+    
+    # TODO: Initialize predictor when model is available
+    # model_path = os.getenv('MODEL_PATH', '/models/aero_surrogate.onnx')
+    # try:
+    #     predictor = AeroPredictor(model_path, use_gpu=True)
+    #     cache = PredictorCache(max_size=1000)
+    #     logger.info("Predictor initialized successfully")
+    # except Exception as e:
+    #     logger.error(f"Failed to initialize predictor: {e}")
+    #     predictor = None
+    
+    logger.info("ML Surrogate Service ready (model pending)")
+
+
+@app.get("/", response_model=Dict[str, str])
+async def root():
+    """Root endpoint"""
+    return {
+        "service": "ML Surrogate API",
+        "version": "1.0.0",
+        "status": "operational",
+        "note": "Model training and deployment pending"
+    }
+
+
+@app.get("/health", response_model=HealthResponse)
+async def health_check():
+    """Health check endpoint"""
+    import torch
+    
+    gpu_available = torch.cuda.is_available()
+    model_loaded = predictor is not None
+    
+    return HealthResponse(
+        status="healthy" if model_loaded else "degraded",
+        service="ml-surrogate",
+        version="1.0.0",
+        gpu_available=gpu_available,
+        model_loaded=model_loaded
+    )
+
+
+@app.post("/predict", response_model=PredictionResponse)
+async def predict(request: PredictionRequest):
+    """
+    Predict aerodynamic quantities using ML surrogate
+    
+    This endpoint provides fast GPU-accelerated predictions for
+    aerodynamic coefficients given mesh geometry and flow conditions.
+    """
+    if predictor is None:
+        # Return mock response until model is trained
+        logger.warning("Predictor not initialized - returning mock response")
+        
+        # Extract parameters
+        velocity = request.parameters.get('velocity', 50.0)
+        alpha = request.parameters.get('alpha', 5.0)
+        
+        # Simple empirical model (placeholder)
+        cl = 0.1 * alpha  # ~0.1 per degree
+        cd = 0.01 + 0.0005 * alpha**2  # Induced drag
+        cm = -0.05
+        
+        return PredictionResponse(
+            cl=cl,
+            cd=cd,
+            cm=cm,
+            confidence=0.5,  # Low confidence for mock
+            inference_time_ms=1.0,
+            cached=False,
+            gpu_used=False
+        )
+    
+    try:
+        # TODO: Implement actual prediction when model is available
+        # Load mesh
+        # mesh = load_mesh(request.mesh_id)
+        
+        # Prepare parameters
+        # params = np.array([
+        #     request.parameters['velocity'],
+        #     request.parameters['alpha'],
+        #     request.parameters.get('yaw', 0.0)
+        # ])
+        
+        # Check cache
+        # if request.use_cache:
+        #     cached_result = cache.get(mesh, params)
+        #     if cached_result:
+        #         return PredictionResponse(**cached_result, cached=True)
+        
+        # Predict
+        # result = predictor.predict(mesh, params, request.return_confidence)
+        
+        # Cache result
+        # if request.use_cache:
+        #     cache.set(mesh, params, result)
+        
+        # return PredictionResponse(**result, cached=False)
+        
+        raise HTTPException(
+            status_code=501,
+            detail="Prediction implementation pending - model training required"
+        )
+        
+    except Exception as e:
+        logger.error(f"Prediction error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/predict/batch")
+async def predict_batch(request: BatchPredictionRequest):
+    """
+    Batch prediction for multiple designs
+    
+    Processes multiple predictions efficiently using batching.
+    """
+    if predictor is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Predictor not initialized - model training required"
+        )
+    
+    try:
+        # TODO: Implement batch prediction
+        # results = []
+        # for req in request.requests:
+        #     result = await predict(req)
+        #     results.append(result)
+        
+        # return {
+        #     'success': True,
+        #     'count': len(results),
+        #     'results': results
+        # }
+        
+        raise HTTPException(
+            status_code=501,
+            detail="Batch prediction implementation pending"
+        )
+        
+    except Exception as e:
+        logger.error(f"Batch prediction error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/models", response_model=List[ModelInfo])
+async def list_models():
+    """
+    List available ML models
+    
+    Returns information about loaded models including
+    architecture, parameters, and device placement.
+    """
+    if predictor is None:
+        return []
+    
+    # TODO: Return actual model info
+    return [
+        ModelInfo(
+            name="aero_surrogate_v1",
+            type="GeoConvNet",
+            parameters=1000000,
+            input_shape=[1, 100, 3],
+            output_shape=[1, 3],
+            device="cuda:0",
+            status="loaded"
+        )
+    ]
+
+
+@app.get("/stats")
+async def get_stats():
+    """
+    Get service statistics
+    
+    Returns performance metrics including inference times,
+    cache hit rates, and GPU utilization.
+    """
+    stats = {
+        'service': 'ml-surrogate',
+        'predictor_loaded': predictor is not None,
+    }
+    
+    if predictor is not None:
+        stats['predictor'] = predictor.get_performance_stats()
+    
+    if cache is not None:
+        stats['cache'] = cache.get_stats()
+    
+    return stats
+
+
+@app.post("/cache/clear")
+async def clear_cache():
+    """Clear prediction cache"""
+    if cache is not None:
+        cache.clear()
+        return {'success': True, 'message': 'Cache cleared'}
+    
+    return {'success': False, 'message': 'Cache not initialized'}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    # Run server
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="info"
+    )
