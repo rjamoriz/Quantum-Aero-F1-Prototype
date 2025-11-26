@@ -1,0 +1,143 @@
+"""
+Visualization Agent
+Generates 3D visualizations and flow field renderings
+"""
+import asyncio
+import json
+from typing import Dict, Any
+from datetime import datetime
+
+from agents.utils.anthropic_client import claude_client
+from agents.utils.nats_client import NATSClient
+from agents.config.config import get_agent_config
+
+
+VISUALIZATION_AGENT_PROMPT = """
+You are the Visualization Agent responsible for generating aerodynamic visualizations.
+
+EXPERTISE:
+- 3D rendering (pressure fields, velocity vectors)
+- Flow visualization (streamlines, vortices)
+- VLM lattice displays
+- Panel method visualization
+- Quantum design comparison
+
+VISUALIZATION TYPES:
+1. **Pressure Field** - Color-mapped surface pressure
+2. **Velocity Vectors** - 3D arrow field
+3. **Streamlines** - Particle tracing
+4. **Vortex Structures** - Q-criterion isosurfaces
+5. **VLM Lattice** - Horseshoe vortices, circulation
+6. **Panel Method** - Source/doublet distribution
+7. **Comparison View** - Side-by-side designs
+
+OUTPUT FORMAT:
+{
+  "visualization_type": "pressure_field",
+  "colormap": "jet",
+  "view_angle": [45, 30, 0],
+  "annotations": ["separation_point", "max_pressure"],
+  "insights": "Strong pressure gradient at x=0.3c indicates..."
+}
+"""
+
+
+class VisualizationAgent:
+    """Visualization agent for 3D rendering"""
+
+    def __init__(self):
+        self.config = get_agent_config("visualization")
+        self.nats = NATSClient()
+        self.running = False
+
+    async def start(self):
+        """Start the agent"""
+        print("=" * 60)
+        print("🎨 Starting Visualization Agent")
+        print("=" * 60)
+
+        await self.nats.connect()
+        await self.nats.subscribe("agent.visualization.render", self._handle_render)
+
+        self.running = True
+        print("✓ Visualization Agent is ready")
+
+    async def stop(self):
+        """Stop the agent"""
+        self.running = False
+        await self.nats.disconnect()
+
+    async def _handle_render(self, msg):
+        """Handle visualization request"""
+        try:
+            data = json.loads(msg.data.decode())
+            print(f"\n🎨 Rendering: {data.get('viz_type')}")
+
+            result = await self.generate_visualization(
+                viz_type=data.get('viz_type'),
+                data=data.get('data'),
+                options=data.get('options', {})
+            )
+
+            await msg.respond(json.dumps(result).encode())
+
+        except Exception as e:
+            print(f"✗ Visualization failed: {e}")
+            await msg.respond(json.dumps({"error": str(e)}).encode())
+
+    async def generate_visualization(
+        self,
+        viz_type: str,
+        data: Dict[str, Any],
+        options: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate visualization configuration"""
+
+        messages = [{
+            "role": "user",
+            "content": f"""Generate visualization configuration:
+
+Type: {viz_type}
+Data: {json.dumps(data, indent=2)}
+Options: {json.dumps(options, indent=2)}
+
+Provide:
+1. Optimal view angle
+2. Colormap selection
+3. Annotation points
+4. Key insights to highlight
+"""
+        }]
+
+        response = await claude_client.create_message(
+            system=VISUALIZATION_AGENT_PROMPT,
+            messages=messages,
+            model=self.config["anthropic"]["model"],
+            temperature=0.2,
+            max_tokens=1024
+        )
+
+        return {
+            "viz_type": viz_type,
+            "configuration": response["content"][0]["text"],
+            "timestamp": datetime.utcnow().isoformat(),
+            "agent": "visualization"
+        }
+
+
+async def main():
+    agent = VisualizationAgent()
+    await agent.start()
+
+    result = await agent.generate_visualization(
+        viz_type="pressure_field",
+        data={"mesh_id": "wing_v3.2", "Cl": 2.8, "Cd": 0.42},
+        options={"colormap": "jet", "show_vectors": True}
+    )
+
+    print(json.dumps(result, indent=2))
+    await agent.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

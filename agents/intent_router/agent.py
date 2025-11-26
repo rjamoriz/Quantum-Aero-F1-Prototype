@@ -1,0 +1,186 @@
+"""
+Intent Router Agent
+Routes user requests to appropriate specialized agents
+"""
+import asyncio
+import json
+from typing import Dict, Any, List
+from datetime import datetime
+
+from agents.utils.anthropic_client import claude_client
+from agents.utils.nats_client import NATSClient
+from agents.config.config import get_agent_config
+
+
+INTENT_ROUTER_PROMPT = """
+You are the Intent Router Agent responsible for routing requests to appropriate specialized agents.
+
+ROLE:
+- Classify user intent from natural language queries
+- Determine which agents are needed
+- Assign priority levels
+- Route to specialized agents
+
+AVAILABLE AGENTS:
+1. **Aerodynamics Agent** - CFD analysis, flow interpretation, VLM
+2. **ML Surrogate Agent** - Fast ML predictions, model selection
+3. **Quantum Optimizer Agent** - Design space optimization, QUBO
+4. **Physics Validator Agent** - Physics-based validation
+5. **Visualization Agent** - 3D rendering, flow visualization
+6. **Analysis Agent** - Trade-off analysis, recommendations
+7. **Data Manager Agent** - Historical data retrieval
+
+INTENT CATEGORIES:
+- **optimization** → Quantum + ML + Physics + Analysis
+- **analysis** → Aerodynamics + Analysis
+- **visualization** → Visualization + Aerodynamics
+- **simulation** → Physics + ML
+- **prediction** → ML + (optional) Physics validation
+- **comparison** → Data Manager + Analysis
+- **design_exploration** → ML + Quantum + Analysis
+
+ROUTING LOGIC:
+1. Parse user query for keywords and intent
+2. Identify required agents
+3. Determine execution order (parallel vs sequential)
+4. Assign priority (high/medium/low)
+5. Return routing plan
+
+OUTPUT FORMAT:
+{
+  "intent": "optimization",
+  "agents_required": ["ml", "quantum", "physics", "analysis"],
+  "execution_mode": "sequential",
+  "priority": "high",
+  "estimated_time": 45,
+  "reasoning": "User wants to optimize design, requires full pipeline"
+}
+"""
+
+
+class IntentRouterAgent:
+    """Intent router agent for request classification"""
+
+    def __init__(self):
+        self.config = get_agent_config("intent_router")
+        self.nats = NATSClient()
+        self.running = False
+
+    async def start(self):
+        """Start the agent"""
+        print("=" * 60)
+        print("🎯 Starting Intent Router Agent")
+        print("=" * 60)
+
+        await self.nats.connect()
+        await self.nats.subscribe("agent.router.route", self._handle_routing)
+
+        self.running = True
+        print("✓ Intent Router Agent is ready")
+
+    async def stop(self):
+        """Stop the agent"""
+        self.running = False
+        await self.nats.disconnect()
+
+    async def _handle_routing(self, msg):
+        """Handle routing request"""
+        try:
+            data = json.loads(msg.data.decode())
+            print(f"\n🎯 Routing query: {data.get('query')[:50]}...")
+
+            result = await self.route_request(
+                query=data.get('query'),
+                context=data.get('context', {})
+            )
+
+            await self.nats.publish("agent.router.result", result)
+            await msg.respond(json.dumps(result).encode())
+
+        except Exception as e:
+            print(f"✗ Routing failed: {e}")
+            await msg.respond(json.dumps({"error": str(e)}).encode())
+
+    async def route_request(
+        self,
+        query: str,
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Route request to appropriate agents"""
+
+        messages = [{
+            "role": "user",
+            "content": f"""Route this user query to appropriate agents:
+
+Query: {query}
+Context: {json.dumps(context, indent=2)}
+
+Determine:
+1. Intent category
+2. Required agents
+3. Execution mode (parallel/sequential)
+4. Priority level
+5. Estimated time
+
+Return as JSON.
+"""
+        }]
+
+        response = await claude_client.create_message(
+            system=INTENT_ROUTER_PROMPT,
+            messages=messages,
+            model=self.config["anthropic"]["model"],
+            temperature=0.1,
+            max_tokens=1024
+        )
+
+        # Extract JSON from response
+        routing_plan = await claude_client.extract_json_from_response(response)
+
+        return {
+            "routing_plan": routing_plan,
+            "query": query,
+            "timestamp": datetime.utcnow().isoformat(),
+            "agent": "intent_router"
+        }
+
+    def classify_intent(self, query: str) -> str:
+        """Quick intent classification using keywords"""
+        query_lower = query.lower()
+
+        if any(word in query_lower for word in ['optimize', 'optimization', 'best', 'improve']):
+            return 'optimization'
+        elif any(word in query_lower for word in ['analyze', 'analysis', 'explain', 'why']):
+            return 'analysis'
+        elif any(word in query_lower for word in ['visualize', 'show', 'display', 'render']):
+            return 'visualization'
+        elif any(word in query_lower for word in ['simulate', 'run', 'compute', 'calculate']):
+            return 'simulation'
+        elif any(word in query_lower for word in ['predict', 'estimate', 'forecast']):
+            return 'prediction'
+        elif any(word in query_lower for word in ['compare', 'difference', 'versus']):
+            return 'comparison'
+        else:
+            return 'general'
+
+
+async def main():
+    agent = IntentRouterAgent()
+    await agent.start()
+
+    # Test routing
+    result = await agent.route_request(
+        query="Optimize this wing for maximum downforce at Monza",
+        context={"mesh_id": "wing_v3.2", "track": "Monza"}
+    )
+
+    print("\n" + "=" * 60)
+    print("Routing Result:")
+    print("=" * 60)
+    print(json.dumps(result, indent=2))
+
+    await agent.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
