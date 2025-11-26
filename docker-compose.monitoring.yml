@@ -1,0 +1,348 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Monitoring Stack - Professional F1 Team Presentation
+  # ============================================================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: f1-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: f1-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=f1quantum2025
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource,grafana-worldmap-panel
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+    volumes:
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: f1-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - monitoring
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: f1-cadvisor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+      - /dev/kmsg
+    networks:
+      - monitoring
+
+  # ============================================================================
+  # Application Services with Metrics
+  # ============================================================================
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: f1-api-gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PROMETHEUS_ENABLED=true
+      - METRICS_PORT=9000
+    networks:
+      - monitoring
+      - app-network
+
+  aerotransformer:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    container_name: f1-aerotransformer
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+      - "9003:9003"  # Metrics
+    environment:
+      - SERVICE_NAME=aerotransformer
+      - PROMETHEUS_ENABLED=true
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - monitoring
+      - app-network
+
+  gnn-rans:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    container_name: f1-gnn-rans
+    restart: unless-stopped
+    ports:
+      - "8004:8004"
+      - "9004:9004"  # Metrics
+    environment:
+      - SERVICE_NAME=gnn-rans
+      - PROMETHEUS_ENABLED=true
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - monitoring
+      - app-network
+
+  vqe-quantum:
+    build:
+      context: .
+      dockerfile: Dockerfile.quantum
+    container_name: f1-vqe-quantum
+    restart: unless-stopped
+    ports:
+      - "8005:8005"
+      - "9005:9005"  # Metrics
+    environment:
+      - SERVICE_NAME=vqe
+      - PROMETHEUS_ENABLED=true
+      - IBM_QUANTUM_TOKEN=${IBM_QUANTUM_TOKEN}
+    networks:
+      - monitoring
+      - app-network
+
+  dwave-annealing:
+    build:
+      context: .
+      dockerfile: Dockerfile.quantum
+    container_name: f1-dwave-annealing
+    restart: unless-stopped
+    ports:
+      - "8006:8006"
+      - "9006:9006"  # Metrics
+    environment:
+      - SERVICE_NAME=dwave
+      - PROMETHEUS_ENABLED=true
+      - DWAVE_API_TOKEN=${DWAVE_API_TOKEN}
+    networks:
+      - monitoring
+      - app-network
+
+  diffusion-models:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    container_name: f1-diffusion-models
+    restart: unless-stopped
+    ports:
+      - "8007:8007"
+      - "9007:9007"  # Metrics
+    environment:
+      - SERVICE_NAME=diffusion
+      - PROMETHEUS_ENABLED=true
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - monitoring
+      - app-network
+
+  rl-control:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    container_name: f1-rl-control
+    restart: unless-stopped
+    ports:
+      - "8008:8008"
+      - "9008:9008"  # Metrics
+    environment:
+      - SERVICE_NAME=rl-control
+      - PROMETHEUS_ENABLED=true
+    networks:
+      - monitoring
+      - app-network
+
+  aerogan:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    container_name: f1-aerogan
+    restart: unless-stopped
+    ports:
+      - "8009:8009"
+      - "9009:9009"  # Metrics
+    environment:
+      - SERVICE_NAME=aerogan
+      - PROMETHEUS_ENABLED=true
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - monitoring
+      - app-network
+
+  # ============================================================================
+  # Time-Series Database for Telemetry
+  # ============================================================================
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    container_name: f1-timescaledb
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=f1_telemetry
+      - POSTGRES_USER=f1admin
+      - POSTGRES_PASSWORD=f1quantum2025
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./sql/init_timescale.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - monitoring
+      - app-network
+
+  # ============================================================================
+  # Message Queue for Real-Time Data
+  # ============================================================================
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: f1-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+    networks:
+      - monitoring
+      - app-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: f1-zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - monitoring
+      - app-network
+
+  # ============================================================================
+  # Frontend Dashboard
+  # ============================================================================
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: f1-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_GRAFANA_URL=http://localhost:3001
+    networks:
+      - app-network
+
+# ============================================================================
+# Networks
+# ============================================================================
+
+networks:
+  monitoring:
+    driver: bridge
+    name: f1-monitoring
+  app-network:
+    driver: bridge
+    name: f1-app-network
+
+# ============================================================================
+# Volumes
+# ============================================================================
+
+volumes:
+  prometheus_data:
+    name: f1-prometheus-data
+  grafana_data:
+    name: f1-grafana-data
+  timescaledb_data:
+    name: f1-timescaledb-data

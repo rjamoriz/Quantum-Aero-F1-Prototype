@@ -8,16 +8,26 @@ import SyntheticDataGenerator from './components/SyntheticDataGenerator';
 import QuantumOptimizationPanel from './components/QuantumOptimizationPanel';
 import TransientScenarioRunner from './components/TransientScenarioRunner';
 import AeroVisualization from './components/AeroVisualization';
+import AeroTransformerDashboard from './components/AeroTransformerDashboard';
+import GNNRANSVisualizer from './components/GNNRANSVisualizer';
+import VQEOptimizationPanel from './components/VQEOptimizationPanel';
+import DWaveAnnealingDashboard from './components/DWaveAnnealingDashboard';
+import GenerativeDesignStudio from './components/GenerativeDesignStudio';
+import EvolutionProgressTracker from './components/EvolutionProgressTracker';
 
 function App() {
-  const [activeTab, setActiveTab] = useState('data');
+  const [activeTab, setActiveTab] = useState('overview');
   const [visualizationData, setVisualizationData] = useState(null);
 
   const tabs = [
-    { id: 'data', label: 'Data Generation', icon: '📊' },
-    { id: 'quantum', label: 'Quantum Optimization', icon: '⚛️' },
-    { id: 'transient', label: 'Transient Scenarios', icon: '🏎️' },
-    { id: 'visualization', label: '3D Visualization', icon: '🎨' }
+    { id: 'overview', label: 'Overview', icon: '📊' },
+    { id: 'aerotransformer', label: 'AeroTransformer', icon: '🚀' },
+    { id: 'gnnrans', label: 'GNN-RANS', icon: '🔬' },
+    { id: 'vqe', label: 'VQE Quantum', icon: '⚛️' },
+    { id: 'dwave', label: 'D-Wave', icon: '🌀' },
+    { id: 'generative', label: 'Generative Design', icon: '🎨' },
+    { id: 'progress', label: 'Progress', icon: '📈' },
+    { id: 'legacy', label: 'Legacy', icon: '🏎️' }
   ];
 
   return (
@@ -87,52 +97,90 @@ function App() {
 
         {/* Tab Content */}
         <div className="transition-all duration-300">
-          {activeTab === 'data' && (
+          {activeTab === 'overview' && (
             <div className="animate-fadeIn">
-              <SyntheticDataGenerator />
+              <EvolutionProgressTracker />
             </div>
           )}
 
-          {activeTab === 'quantum' && (
+          {activeTab === 'aerotransformer' && (
             <div className="animate-fadeIn">
-              <QuantumOptimizationPanel />
+              <AeroTransformerDashboard />
             </div>
           )}
 
-          {activeTab === 'transient' && (
+          {activeTab === 'gnnrans' && (
             <div className="animate-fadeIn">
-              <TransientScenarioRunner />
+              <GNNRANSVisualizer />
             </div>
           )}
 
-          {activeTab === 'visualization' && (
+          {activeTab === 'vqe' && (
             <div className="animate-fadeIn">
-              <div className="bg-white rounded-lg shadow-lg p-6">
-                <h2 className="text-2xl font-bold mb-4">3D Aerodynamic Visualization</h2>
-                <div className="h-[600px] bg-gray-900 rounded-lg">
-                  <AeroVisualization data={visualizationData} />
-                </div>
-                
-                {/* Visualization Controls */}
-                <div className="mt-4 grid grid-cols-3 gap-4">
-                  <button
-                    onClick={() => setVisualizationData({ type: 'front_wing' })}
-                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                  >
-                    Load Front Wing
-                  </button>
-                  <button
-                    onClick={() => setVisualizationData({ type: 'rear_wing' })}
-                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                  >
-                    Load Rear Wing
-                  </button>
-                  <button
-                    onClick={() => setVisualizationData({ type: 'complete_car' })}
-                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                  >
-                    Load Complete Car
-                  </button>
+              <VQEOptimizationPanel />
+            </div>
+          )}
+
+          {activeTab === 'dwave' && (
+            <div className="animate-fadeIn">
+              <DWaveAnnealingDashboard />
+            </div>
+          )}
+
+          {activeTab === 'generative' && (
+            <div className="animate-fadeIn">
+              <GenerativeDesignStudio />
+            </div>
+          )}
+
+          {activeTab === 'progress' && (
+            <div className="animate-fadeIn">
+              <EvolutionProgressTracker />
+            </div>
+          )}
+
+          {activeTab === 'legacy' && (
+            <div className="space-y-6">
+              <div className="animate-fadeIn">
+                <SyntheticDataGenerator />
+              </div>
+              
+              <div className="animate-fadeIn">
+                <QuantumOptimizationPanel />
+              </div>
+              
+              <div className="animate-fadeIn">
+                <TransientScenarioRunner />
+              </div>
+              
+              <div className="animate-fadeIn">
+                <div className="bg-white rounded-lg shadow-lg p-6">
+                  <h2 className="text-2xl font-bold mb-4">3D Aerodynamic Visualization</h2>
+                  <div className="h-[600px] bg-gray-900 rounded-lg">
+                    <AeroVisualization data={visualizationData} />
+                  </div>
+                  
+                  {/* Visualization Controls */}
+                  <div className="mt-4 grid grid-cols-3 gap-4">
+                    <button
+                      onClick={() => setVisualizationData({ type: 'front_wing' })}
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      Load Front Wing
+                    </button>
+                    <button
+                      onClick={() => setVisualizationData({ type: 'rear_wing' })}
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      Load Rear Wing
+                    </button>
+                    <button
+                      onClick={() => setVisualizationData({ type: 'complete_car' })}
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      Load Complete Car
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
