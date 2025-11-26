@@ -596,25 +596,25 @@ Where:
 
 $$
 \begin{bmatrix}
-\mathbf{M}_s & \mathbf{0} \\
+\mathbf{M}_s & \mathbf{0} \\\\
 \rho_0 \mathbf{C}^T & \mathbf{M}_f
 \end{bmatrix}
 \begin{bmatrix}
-\ddot{\mathbf{u}} \\
+\ddot{\mathbf{u}} \\\\
 \ddot{\mathbf{p}}
 \end{bmatrix}
 +
 \begin{bmatrix}
-\mathbf{K}_s & -\mathbf{C} \\
+\mathbf{K}_s & -\mathbf{C} \\\\
 \mathbf{0} & \mathbf{K}_f
 \end{bmatrix}
 \begin{bmatrix}
-\mathbf{u} \\
+\mathbf{u} \\\\
 \mathbf{p}
 \end{bmatrix}
 =
 \begin{bmatrix}
-\mathbf{F}_s \\
+\mathbf{F}_s \\\\
 \mathbf{0}
 \end{bmatrix}
 $$
@@ -699,16 +699,16 @@ For each time step:
 
 $$
 \begin{bmatrix}
-\mathbf{A}_{ff} & \mathbf{A}_{fs} \\
+\mathbf{A}_{ff} & \mathbf{A}_{fs} \\\\
 \mathbf{A}_{sf} & \mathbf{A}_{ss}
 \end{bmatrix}
 \begin{bmatrix}
-\mathbf{x}_f \\
+\mathbf{x}_f \\\\
 \mathbf{x}_s
 \end{bmatrix}
 =
 \begin{bmatrix}
-\mathbf{b}_f \\
+\mathbf{b}_f \\\\
 \mathbf{b}_s
 \end{bmatrix}
 $$
@@ -728,10 +728,10 @@ $$
 
 $$
 \min_{\mathbf{x}} \mathbf{F}(\mathbf{x}) = \begin{bmatrix}
--C_L(\mathbf{x}) \\
-C_D(\mathbf{x}) \\
-SPL(\mathbf{x}) \\
-\sigma_{max}(\mathbf{x}) \\
+-C_L(\mathbf{x}) \\\\
+C_D(\mathbf{x}) \\\\
+SPL(\mathbf{x}) \\\\
+\sigma_{max}(\mathbf{x}) \\\\
 T_{max}(\mathbf{x})
 \end{bmatrix}
 $$
