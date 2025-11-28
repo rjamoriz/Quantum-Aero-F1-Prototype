@@ -1,1 +1,354 @@
-# Quantum-Aero F1 Prototype - Quick Start Guide  **Last Updated**: November 26, 2025  ---  ## ­ƒÜÇ Quick Start (5 Minutes)  ### Prerequisites  - Docker & Docker Compose - Git - (Optional) Python 3.11+ for local development - (Optional) Node.js 18+ for local development - (Optional) NVIDIA GPU + CUDA for ML acceleration  ### 1. Clone Repository  ```bash git clone https://github.com/rjamoriz/Quantum-Aero-F1-Prototype.git cd Quantum-Aero-F1-Prototype ```  ### 2. Start All Services  ```bash # Start infrastructure and services docker-compose up -d  # Check service health docker-compose ps ```  ### 3. Verify Services  ```bash # Backend API curl http://localhost:3001/health  # Physics Engine curl http://localhost:8001/health  # MongoDB docker exec -it qaero-mongodb mongosh --eval "db.adminCommand('ping')"  # Redis docker exec -it qaero-redis redis-cli ping ```  ### 4. Test VLM Solver  ```bash curl -X POST http://localhost:8001/vlm/solve \   -H "Content-Type: application/json" \   -d '{     "geometry": {       "span": 1.0,       "chord": 0.2,       "twist": 0.0,       "dihedral": 0.0,       "sweep": 0.0,       "taper_ratio": 1.0     },     "velocity": 50.0,     "alpha": 5.0,     "yaw": 0.0,     "rho": 1.225,     "n_panels_x": 20,     "n_panels_y": 10   }' ```  Expected response: ```json {   "cl": 0.55,   "cd": 0.02,   "cm": -0.05,   "l_over_d": 27.5,   ... } ```  ---  ## ­ƒôè Service Endpoints  ### Backend API Gateway (Port 3001)  - **Health**: `GET /health` - **Physics**: `POST /api/physics/vlm/solve` - **ML**: `POST /api/ml/predict` (pending) - **Quantum**: `POST /api/quantum/optimize` (pending) - **Claude**: `POST /api/claude/chat` (pending)  ### Physics Engine (Port 8001)  - **VLM Solve**: `POST /vlm/solve` - **VLM Sweep**: `POST /vlm/sweep` - **Validate**: `GET /vlm/validate` - **Health**: `GET /health`  ### Infrastructure  - **MongoDB**: `localhost:27017` - **Redis**: `localhost:6379` - **NATS**: `localhost:4222` (client), `localhost:8222` (monitoring)  ---  ## ­ƒøá´©Å Development Mode  ### Run Services Locally  #### Backend API  ```bash cd services/backend npm install cp .env.example .env npm run dev ```  #### Physics Engine  ```bash cd services/physics-engine pip install -r requirements.txt python api/server.py ```  ### Run Tests  ```bash # Physics Engine cd services/physics-engine pytest tests/ -v  # Backend cd services/backend npm test ```  ---  ## ­ƒÉ│ Docker Commands  ### Start Services  ```bash # Start all services docker-compose up -d  # Start specific service docker-compose up -d backend  # View logs docker-compose logs -f backend  # Restart service docker-compose restart physics-engine ```  ### Stop Services  ```bash # Stop all services docker-compose down  # Stop and remove volumes docker-compose down -v ```  ### Rebuild Services  ```bash # Rebuild all services docker-compose build  # Rebuild specific service docker-compose build backend  # Rebuild and restart docker-compose up -d --build ```  ---  ## ­ƒôü Project Structure  ``` Quantum-Aero-F1-Prototype/ Ôö£ÔöÇÔöÇ services/ Ôöé   Ôö£ÔöÇÔöÇ backend/          # Node.js API Gateway Ô£à Ôöé   Ôö£ÔöÇÔöÇ physics-engine/   # VLM Solver Ô£à Ôöé   Ôö£ÔöÇÔöÇ ml-surrogate/     # ML Inference (pending) Ôöé   ÔööÔöÇÔöÇ quantum-optimizer/# QAOA/QUBO (pending) Ôö£ÔöÇÔöÇ agents/               # Claude AI Agents Ô£à Ôö£ÔöÇÔöÇ frontend/             # React App (partial) Ôö£ÔöÇÔöÇ data/                 # Datasets Ôö£ÔöÇÔöÇ tests/                # Testing Ôö£ÔöÇÔöÇ docs/                 # Documentation ÔööÔöÇÔöÇ docker-compose.yml    # Orchestration Ô£à ```  ---  ## ­ƒöº Configuration  ### Environment Variables  Copy `.env.example` files and configure:  ```bash # Backend cp services/backend/.env.example services/backend/.env  # Edit as needed nano services/backend/.env ```  ### Service URLs  Default configuration (Docker): - Backend: `http://backend:3001` - Physics: `http://physics-engine:8001` - ML: `http://ml-surrogate:8000` - Quantum: `http://quantum-optimizer:8002`  Local development: - Backend: `http://localhost:3001` - Physics: `http://localhost:8001` - ML: `http://localhost:8000` - Quantum: `http://localhost:8002`  ---  ## ­ƒº¬ Testing  ### VLM Solver Validation  ```bash # Validate against NACA 0012 data curl http://localhost:8001/vlm/validate ```  ### Alpha Sweep  ```bash curl -X POST http://localhost:8001/vlm/sweep \   -H "Content-Type: application/json" \   -d '{     "geometry": {       "span": 1.0,       "chord": 0.2     },     "velocity": 50.0,     "alpha_start": -5,     "alpha_end": 15,     "alpha_step": 1.0   }' ```  ---  ## ­ƒôê Monitoring  ### Service Health  ```bash # Check all services curl http://localhost:3001/health curl http://localhost:8001/health  # NATS monitoring open http://localhost:8222 ```  ### Logs  ```bash # View all logs docker-compose logs -f  # View specific service docker-compose logs -f backend docker-compose logs -f physics-engine  # Backend logs (local) tail -f services/backend/logs/combined.log ```  ---  ## ­ƒÉø Troubleshooting  ### Services Won't Start  ```bash # Check Docker docker --version docker-compose --version  # Check ports lsof -i :3001 lsof -i :8001  # Restart Docker docker-compose down docker-compose up -d ```  ### MongoDB Connection Issues  ```bash # Check MongoDB docker exec -it qaero-mongodb mongosh  # Reset MongoDB docker-compose down -v docker-compose up -d mongodb ```  ### Redis Connection Issues  ```bash # Check Redis docker exec -it qaero-redis redis-cli ping  # Flush Redis docker exec -it qaero-redis redis-cli FLUSHALL ```  ---  ## ­ƒôÜ Next Steps  1. **Complete ML Surrogate Service** - PyTorch + ONNX GPU inference 2. **Implement Quantum Optimizer** - Qiskit QAOA/QUBO 3. **Build Frontend** - React + Three.js visualization 4. **Add Testing** - Comprehensive test suite 5. **Deploy to Production** - Cloud deployment  ---  ## ­ƒåÿ Support  - **Documentation**: See `/docs` directory - **Issues**: GitHub Issues - **Implementation Status**: See `IMPLEMENTATION_STATUS.md`  ---  **Ready to build F1 aerodynamics! ­ƒÅÄ´©Å­ƒÆ¿**
+# Quantum-Aero F1 Prototype - Quick Start Guide
+
+**Last Updated**: November 26, 2025
+
+---
+
+## 🚀 Quick Start (5 Minutes)
+
+### Prerequisites
+
+- Docker & Docker Compose
+- Git
+- (Optional) Python 3.11+ for local development
+- (Optional) Node.js 18+ for local development
+- (Optional) NVIDIA GPU + CUDA for ML acceleration
+
+### 1. Clone Repository
+
+```bash
+git clone https://github.com/rjamoriz/Quantum-Aero-F1-Prototype.git
+cd Quantum-Aero-F1-Prototype
+```
+
+### 2. Start All Services
+
+```bash
+# Start infrastructure and services
+docker-compose up -d
+
+# Check service health
+docker-compose ps
+```
+
+### 3. Verify Services
+
+```bash
+# Backend API
+curl http://localhost:3001/health
+
+# Physics Engine
+curl http://localhost:8001/health
+
+# MongoDB
+docker exec -it qaero-mongodb mongosh --eval "db.adminCommand('ping')"
+
+# Redis
+docker exec -it qaero-redis redis-cli ping
+```
+
+### 4. Test VLM Solver
+
+```bash
+curl -X POST http://localhost:8001/vlm/solve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "geometry": {
+      "span": 1.0,
+      "chord": 0.2,
+      "twist": 0.0,
+      "dihedral": 0.0,
+      "sweep": 0.0,
+      "taper_ratio": 1.0
+    },
+    "velocity": 50.0,
+    "alpha": 5.0,
+    "yaw": 0.0,
+    "rho": 1.225,
+    "n_panels_x": 20,
+    "n_panels_y": 10
+  }'
+```
+
+Expected response:
+```json
+{
+  "cl": 0.55,
+  "cd": 0.02,
+  "cm": -0.05,
+  "l_over_d": 27.5,
+  ...
+}
+```
+
+---
+
+## 📊 Service Endpoints
+
+### Backend API Gateway (Port 3001)
+
+- **Health**: `GET /health`
+- **Physics**: `POST /api/physics/vlm/solve`
+- **ML**: `POST /api/ml/predict` (pending)
+- **Quantum**: `POST /api/quantum/optimize` (pending)
+- **Claude**: `POST /api/claude/chat` (pending)
+
+### Physics Engine (Port 8001)
+
+- **VLM Solve**: `POST /vlm/solve`
+- **VLM Sweep**: `POST /vlm/sweep`
+- **Validate**: `GET /vlm/validate`
+- **Health**: `GET /health`
+
+### Infrastructure
+
+- **MongoDB**: `localhost:27017`
+- **Redis**: `localhost:6379`
+- **NATS**: `localhost:4222` (client), `localhost:8222` (monitoring)
+
+---
+
+## 🛠️ Development Mode
+
+### Run Services Locally
+
+#### Backend API
+
+```bash
+cd services/backend
+npm install
+cp .env.example .env
+npm run dev
+```
+
+#### Physics Engine
+
+```bash
+cd services/physics-engine
+pip install -r requirements.txt
+python api/server.py
+```
+
+### Run Tests
+
+```bash
+# Physics Engine
+cd services/physics-engine
+pytest tests/ -v
+
+# Backend
+cd services/backend
+npm test
+```
+
+---
+
+## 🐳 Docker Commands
+
+### Start Services
+
+```bash
+# Start all services
+docker-compose up -d
+
+# Start specific service
+docker-compose up -d backend
+
+# View logs
+docker-compose logs -f backend
+
+# Restart service
+docker-compose restart physics-engine
+```
+
+### Stop Services
+
+```bash
+# Stop all services
+docker-compose down
+
+# Stop and remove volumes
+docker-compose down -v
+```
+
+### Rebuild Services
+
+```bash
+# Rebuild all services
+docker-compose build
+
+# Rebuild specific service
+docker-compose build backend
+
+# Rebuild and restart
+docker-compose up -d --build
+```
+
+---
+
+## 📁 Project Structure
+
+```
+Quantum-Aero-F1-Prototype/
+├── services/
+│   ├── backend/          # Node.js API Gateway ✅
+│   ├── physics-engine/   # VLM Solver ✅
+│   ├── ml-surrogate/     # ML Inference (pending)
+│   └── quantum-optimizer/# QAOA/QUBO (pending)
+├── agents/               # Claude AI Agents ✅
+├── frontend/             # React App (partial)
+├── data/                 # Datasets
+├── tests/                # Testing
+├── docs/                 # Documentation
+└── docker-compose.yml    # Orchestration ✅
+```
+
+---
+
+## 🔧 Configuration
+
+### Environment Variables
+
+Copy `.env.example` files and configure:
+
+```bash
+# Backend
+cp services/backend/.env.example services/backend/.env
+
+# Edit as needed
+nano services/backend/.env
+```
+
+### Service URLs
+
+Default configuration (Docker):
+- Backend: `http://backend:3001`
+- Physics: `http://physics-engine:8001`
+- ML: `http://ml-surrogate:8000`
+- Quantum: `http://quantum-optimizer:8002`
+
+Local development:
+- Backend: `http://localhost:3001`
+- Physics: `http://localhost:8001`
+- ML: `http://localhost:8000`
+- Quantum: `http://localhost:8002`
+
+---
+
+## 🧪 Testing
+
+### VLM Solver Validation
+
+```bash
+# Validate against NACA 0012 data
+curl http://localhost:8001/vlm/validate
+```
+
+### Alpha Sweep
+
+```bash
+curl -X POST http://localhost:8001/vlm/sweep \
+  -H "Content-Type: application/json" \
+  -d '{
+    "geometry": {
+      "span": 1.0,
+      "chord": 0.2
+    },
+    "velocity": 50.0,
+    "alpha_start": -5,
+    "alpha_end": 15,
+    "alpha_step": 1.0
+  }'
+```
+
+---
+
+## 📈 Monitoring
+
+### Service Health
+
+```bash
+# Check all services
+curl http://localhost:3001/health
+curl http://localhost:8001/health
+
+# NATS monitoring
+open http://localhost:8222
+```
+
+### Logs
+
+```bash
+# View all logs
+docker-compose logs -f
+
+# View specific service
+docker-compose logs -f backend
+docker-compose logs -f physics-engine
+
+# Backend logs (local)
+tail -f services/backend/logs/combined.log
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Services Won't Start
+
+```bash
+# Check Docker
+docker --version
+docker-compose --version
+
+# Check ports
+lsof -i :3001
+lsof -i :8001
+
+# Restart Docker
+docker-compose down
+docker-compose up -d
+```
+
+### MongoDB Connection Issues
+
+```bash
+# Check MongoDB
+docker exec -it qaero-mongodb mongosh
+
+# Reset MongoDB
+docker-compose down -v
+docker-compose up -d mongodb
+```
+
+### Redis Connection Issues
+
+```bash
+# Check Redis
+docker exec -it qaero-redis redis-cli ping
+
+# Flush Redis
+docker exec -it qaero-redis redis-cli FLUSHALL
+```
+
+---
+
+## 📚 Next Steps
+
+1. **Complete ML Surrogate Service** - PyTorch + ONNX GPU inference
+2. **Implement Quantum Optimizer** - Qiskit QAOA/QUBO
+3. **Build Frontend** - React + Three.js visualization
+4. **Add Testing** - Comprehensive test suite
+5. **Deploy to Production** - Cloud deployment
+
+---
+
+## 🆘 Support
+
+- **Documentation**: See `/docs` directory
+- **Issues**: GitHub Issues
+- **Implementation Status**: See `IMPLEMENTATION_STATUS.md`
+
+---
+
+**Ready to build F1 aerodynamics! 🏎️💨**

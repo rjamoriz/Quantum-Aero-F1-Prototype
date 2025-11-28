@@ -1,1 +1,504 @@
-# ­ƒñû GenAI Multi-Agent System - Setup Guide  Complete setup guide for the Quantum-Aero F1 Prototype GenAI system powered by Anthropic Claude.  ---  ## ­ƒôï Table of Contents  1. [Prerequisites](#prerequisites) 2. [Environment Setup](#environment-setup) 3. [Claude API Configuration](#claude-api-configuration) 4. [NATS/SLIM Infrastructure](#natsslim-infrastructure) 5. [Agent Deployment](#agent-deployment) 6. [Testing & Verification](#testing--verification) 7. [Troubleshooting](#troubleshooting)  ---  ## ­ƒöº Prerequisites  ### Required Software  - **Python 3.10+** (for agents) - **Docker & Docker Compose** (for infrastructure) - **Node.js 18+** (for frontend) - **Git** (for version control)  ### Required Accounts  - **Anthropic Account**: Get your Claude API key from [console.anthropic.com](https://console.anthropic.com/)  ### System Requirements  - **CPU**: 8+ cores recommended - **RAM**: 16GB minimum, 32GB recommended - **GPU**: Optional (for ML inference acceleration) - **Disk**: 50GB free space  ---  ## ­ƒîì Environment Setup  ### Step 1: Clone Repository  ```bash cd /Users/Ruben_MACPRO/Desktop/F1\ Project\ NexGen ```  ### Step 2: Create Python Virtual Environment  ```bash # Create virtual environment python3 -m venv agents/venv  # Activate virtual environment source agents/venv/bin/activate  # macOS/Linux # OR agents\venv\Scripts\activate  # Windows ```  ### Step 3: Install Python Dependencies  ```bash # Install agent dependencies pip install --upgrade pip pip install anthropic==0.39.0 pip install nats-py==2.9.0 pip install aiohttp==3.10.10 pip install python-dotenv==1.0.1 pip install pydantic==2.10.3 pip install opentelemetry-api==1.28.2 pip install opentelemetry-sdk==1.28.2 pip install redis==5.2.1 pip install motor==3.6.0  # MongoDB async driver pip install qdrant-client==1.12.1 ```  ### Step 4: Create Environment File  ```bash # Copy template to .env cp agents/.env.template agents/.env ```  ---  ## ­ƒöæ Claude API Configuration  ### Step 1: Get Your API Key  1. Go to [console.anthropic.com](https://console.anthropic.com/) 2. Sign up or log in 3. Navigate to **API Keys** 4. Create a new API key 5. Copy the key (starts with `sk-ant-api03-...`)  ### Step 2: Configure .env File  Open `agents/.env` and add your API key:  ```bash # ============================================ # ANTHROPIC CLAUDE API # ============================================ ANTHROPIC_API_KEY=sk-ant-api03-YOUR-ACTUAL-API-KEY-HERE  # Claude Models ANTHROPIC_MODEL_SONNET=claude-sonnet-4.5-20250929 ANTHROPIC_MODEL_HAIKU=claude-haiku-4-20250514  # Claude Configuration ANTHROPIC_MAX_TOKENS=4096 ANTHROPIC_TEMPERATURE=0.2 ANTHROPIC_TIMEOUT=60 ```  ### Step 3: Verify API Key  ```bash # Test Claude API connection python agents/utils/test_anthropic.py ```  Expected output: ``` Ô£ô Claude API connection successful Ô£ô Model: claude-sonnet-4.5-20250929 Ô£ô Response received ```  ---  ## ­ƒÜÇ NATS/SLIM Infrastructure  ### Step 1: Start NATS Message Broker  ```bash # Start NATS with Docker Compose docker-compose -f docker-compose.agents.yml up -d nats  # Verify NATS is running docker ps | grep nats ```  ### Step 2: Verify NATS Connection  ```bash # Check NATS logs docker logs qaero-nats  # Test NATS connection curl http://localhost:8222/varz ```  Expected output: JSON with NATS server info  ### Step 3: Start Supporting Services  ```bash # Start MongoDB (for LangGraph checkpoints) docker-compose -f docker-compose.agents.yml up -d mongodb  # Start Redis (for caching) docker-compose -f docker-compose.agents.yml up -d redis  # Start Qdrant (for vector storage) docker-compose -f docker-compose.agents.yml up -d qdrant  # Verify all services docker-compose -f docker-compose.agents.yml ps ```  ---  ## ­ƒñû Agent Deployment  ### Option 1: Deploy All Agents with Docker  ```bash # Deploy all 8 agents docker-compose -f docker-compose.agents.yml up -d  # Check agent status docker-compose -f docker-compose.agents.yml ps  # View agent logs docker-compose -f docker-compose.agents.yml logs -f master-orchestrator ```  ### Option 2: Run Agents Locally (Development)  ```bash # Activate virtual environment source agents/venv/bin/activate  # Run Master Orchestrator python agents/master_orchestrator/agent.py &  # Run Intent Router python agents/intent_router/agent.py &  # Run Aerodynamics Agent python agents/aerodynamics/agent.py &  # Run ML Surrogate Agent python agents/ml_surrogate/agent.py &  # Run Quantum Optimizer Agent python agents/quantum_optimizer/agent.py &  # Run Physics Validator Agent python agents/physics_validator/agent.py &  # Run Analysis Agent python agents/analysis/agent.py &  # Run Visualization Agent python agents/visualization/agent.py & ```  ### Agent Startup Order  1. **NATS** (infrastructure) 2. **Master Orchestrator** (coordinator) 3. **Intent Router** (request routing) 4. **Specialized Agents** (parallel)  ---  ## Ô£à Testing & Verification  ### Test 1: Agent Health Check  ```bash # Check all agents are connected to NATS curl http://localhost:8222/connz | jq '.connections[] | .name' ```  Expected output: List of 8 agent connections  ### Test 2: Send Test Request  ```python # test_agent_system.py import asyncio from agents.utils.nats_client import NATSClient  async def test_system():     nats = NATSClient()     await nats.connect()          # Test Master Orchestrator     response = await nats.request(         "agent.orchestrator.query",         {             "query": "Optimize this wing for maximum downforce",             "mesh_id": "wing_v3.2"         },         timeout=30.0     )          print("Response:", response)     await nats.disconnect()  asyncio.run(test_system()) ```  Run test: ```bash python test_agent_system.py ```  ### Test 3: Frontend Integration  ```bash # Start frontend cd frontend npm install npm start  # Open browser open http://localhost:3000  # Navigate to Claude Chat Interface # Send test message: "Analyze wing aerodynamics" ```  ---  ## ­ƒöì Monitoring & Observability  ### Prometheus Metrics  ```bash # Access Prometheus open http://localhost:9090  # Query agent metrics agent_requests_total agent_response_time_seconds claude_api_calls_total ```  ### Grafana Dashboards  ```bash # Access Grafana open http://localhost:3001  # Login: admin / admin # Import dashboard: dashboards/agent-monitoring.json ```  ### Agent Logs  ```bash # View all agent logs docker-compose -f docker-compose.agents.yml logs -f  # View specific agent docker-compose -f docker-compose.agents.yml logs -f aerodynamics-agent  # View NATS logs docker logs qaero-nats -f ```  ---  ## ­ƒÉø Troubleshooting  ### Issue: "ANTHROPIC_API_KEY not found"  **Solution:** ```bash # Verify .env file exists ls -la agents/.env  # Check API key is set grep ANTHROPIC_API_KEY agents/.env  # Reload environment source agents/.env ```  ### Issue: "Cannot connect to NATS"  **Solution:** ```bash # Check NATS is running docker ps | grep nats  # Restart NATS docker-compose -f docker-compose.agents.yml restart nats  # Check NATS logs docker logs qaero-nats  # Verify port 4222 is open lsof -i :4222 ```  ### Issue: "Claude API rate limit exceeded"  **Solution:** ```bash # Check your API usage at console.anthropic.com # Implement rate limiting in .env: RATE_LIMIT_ENABLED=true RATE_LIMIT_MAX_REQUESTS=50 RATE_LIMIT_WINDOW_SECONDS=60 ```  ### Issue: "Agent not responding"  **Solution:** ```bash # Check agent logs docker-compose -f docker-compose.agents.yml logs agent-name  # Restart specific agent docker-compose -f docker-compose.agents.yml restart agent-name  # Verify NATS connection curl http://localhost:8222/connz ```  ### Issue: "Out of memory"  **Solution:** ```bash # Increase Docker memory limit # Edit docker-compose.agents.yml: services:   master-orchestrator:     mem_limit: 8g  # Increase from 4g  # Restart services docker-compose -f docker-compose.agents.yml down docker-compose -f docker-compose.agents.yml up -d ```  ---  ## ­ƒôè Performance Tuning  ### Agent Replicas  For high load, scale agents horizontally:  ```yaml # docker-compose.agents.yml services:   ml-agent:     deploy:       replicas: 3  # Run 3 instances ```  ### NATS Configuration  Optimize NATS for throughput:  ```bash # .env NATS_MAX_PAYLOAD=10485760  # 10MB NATS_MAX_PENDING=1048576000  # 1GB ```  ### Claude API Optimization  ```bash # .env ANTHROPIC_MAX_TOKENS=2048  # Reduce for faster responses ANTHROPIC_TEMPERATURE=0.1  # Lower for more deterministic CACHE_ENABLED=true  # Enable response caching CACHE_TTL=3600  # 1 hour cache ```  ---  ## ­ƒöÉ Security Best Practices  1. **Never commit .env file** (already in .gitignore) 2. **Rotate API keys regularly** (every 90 days) 3. **Use environment-specific keys** (dev/staging/prod) 4. **Enable rate limiting** (prevent abuse) 5. **Monitor API usage** (track costs) 6. **Use JWT authentication** (for agent-to-agent) 7. **Enable TLS for NATS** (production)  ---  ## ­ƒôÜ Additional Resources  - [Anthropic Claude Documentation](https://docs.anthropic.com/) - [NATS Documentation](https://docs.nats.io/) - [LangGraph Documentation](https://langchain-ai.github.io/langgraph/) - [Docker Compose Documentation](https://docs.docker.com/compose/)  ---  ## ­ƒÄ» Quick Start Checklist  - [ ] Python 3.10+ installed - [ ] Docker & Docker Compose installed - [ ] Claude API key obtained - [ ] Virtual environment created - [ ] Dependencies installed - [ ] .env file configured - [ ] NATS started - [ ] Agents deployed - [ ] System tested - [ ] Frontend connected  ---  ## ­ƒÆí Tips for Success  1. **Start small**: Test with Master Orchestrator first 2. **Monitor logs**: Watch agent logs during development 3. **Use mock data**: Test without backend services initially 4. **Cache responses**: Enable caching to reduce API costs 5. **Scale gradually**: Add agents as needed 6. **Monitor costs**: Track Claude API usage 7. **Version control**: Commit working configurations  ---  ## ­ƒÜÇ Next Steps  After setup is complete:  1. **Test each agent individually** 2. **Run end-to-end workflow** 3. **Integrate with frontend** 4. **Deploy to production** 5. **Set up monitoring** 6. **Configure alerts** 7. **Optimize performance**  ---  **­ƒÄë You're ready to use the GenAI Multi-Agent System!**  For support, check the troubleshooting section or review agent logs.
+# 🤖 GenAI Multi-Agent System - Setup Guide
+
+Complete setup guide for the Quantum-Aero F1 Prototype GenAI system powered by Anthropic Claude.
+
+---
+
+## 📋 Table of Contents
+
+1. [Prerequisites](#prerequisites)
+2. [Environment Setup](#environment-setup)
+3. [Claude API Configuration](#claude-api-configuration)
+4. [NATS/SLIM Infrastructure](#natsslim-infrastructure)
+5. [Agent Deployment](#agent-deployment)
+6. [Testing & Verification](#testing--verification)
+7. [Troubleshooting](#troubleshooting)
+
+---
+
+## 🔧 Prerequisites
+
+### Required Software
+
+- **Python 3.10+** (for agents)
+- **Docker & Docker Compose** (for infrastructure)
+- **Node.js 18+** (for frontend)
+- **Git** (for version control)
+
+### Required Accounts
+
+- **Anthropic Account**: Get your Claude API key from [console.anthropic.com](https://console.anthropic.com/)
+
+### System Requirements
+
+- **CPU**: 8+ cores recommended
+- **RAM**: 16GB minimum, 32GB recommended
+- **GPU**: Optional (for ML inference acceleration)
+- **Disk**: 50GB free space
+
+---
+
+## 🌍 Environment Setup
+
+### Step 1: Clone Repository
+
+```bash
+cd /Users/Ruben_MACPRO/Desktop/F1\ Project\ NexGen
+```
+
+### Step 2: Create Python Virtual Environment
+
+```bash
+# Create virtual environment
+python3 -m venv agents/venv
+
+# Activate virtual environment
+source agents/venv/bin/activate  # macOS/Linux
+# OR
+agents\venv\Scripts\activate  # Windows
+```
+
+### Step 3: Install Python Dependencies
+
+```bash
+# Install agent dependencies
+pip install --upgrade pip
+pip install anthropic==0.39.0
+pip install nats-py==2.9.0
+pip install aiohttp==3.10.10
+pip install python-dotenv==1.0.1
+pip install pydantic==2.10.3
+pip install opentelemetry-api==1.28.2
+pip install opentelemetry-sdk==1.28.2
+pip install redis==5.2.1
+pip install motor==3.6.0  # MongoDB async driver
+pip install qdrant-client==1.12.1
+```
+
+### Step 4: Create Environment File
+
+```bash
+# Copy template to .env
+cp agents/.env.template agents/.env
+```
+
+---
+
+## 🔑 Claude API Configuration
+
+### Step 1: Get Your API Key
+
+1. Go to [console.anthropic.com](https://console.anthropic.com/)
+2. Sign up or log in
+3. Navigate to **API Keys**
+4. Create a new API key
+5. Copy the key (starts with `sk-ant-api03-...`)
+
+### Step 2: Configure .env File
+
+Open `agents/.env` and add your API key:
+
+```bash
+# ============================================
+# ANTHROPIC CLAUDE API
+# ============================================
+ANTHROPIC_API_KEY=sk-ant-api03-YOUR-ACTUAL-API-KEY-HERE
+
+# Claude Models
+ANTHROPIC_MODEL_SONNET=claude-sonnet-4.5-20250929
+ANTHROPIC_MODEL_HAIKU=claude-haiku-4-20250514
+
+# Claude Configuration
+ANTHROPIC_MAX_TOKENS=4096
+ANTHROPIC_TEMPERATURE=0.2
+ANTHROPIC_TIMEOUT=60
+```
+
+### Step 3: Verify API Key
+
+```bash
+# Test Claude API connection
+python agents/utils/test_anthropic.py
+```
+
+Expected output:
+```
+✓ Claude API connection successful
+✓ Model: claude-sonnet-4.5-20250929
+✓ Response received
+```
+
+---
+
+## 🚀 NATS/SLIM Infrastructure
+
+### Step 1: Start NATS Message Broker
+
+```bash
+# Start NATS with Docker Compose
+docker-compose -f docker-compose.agents.yml up -d nats
+
+# Verify NATS is running
+docker ps | grep nats
+```
+
+### Step 2: Verify NATS Connection
+
+```bash
+# Check NATS logs
+docker logs qaero-nats
+
+# Test NATS connection
+curl http://localhost:8222/varz
+```
+
+Expected output: JSON with NATS server info
+
+### Step 3: Start Supporting Services
+
+```bash
+# Start MongoDB (for LangGraph checkpoints)
+docker-compose -f docker-compose.agents.yml up -d mongodb
+
+# Start Redis (for caching)
+docker-compose -f docker-compose.agents.yml up -d redis
+
+# Start Qdrant (for vector storage)
+docker-compose -f docker-compose.agents.yml up -d qdrant
+
+# Verify all services
+docker-compose -f docker-compose.agents.yml ps
+```
+
+---
+
+## 🤖 Agent Deployment
+
+### Option 1: Deploy All Agents with Docker
+
+```bash
+# Deploy all 8 agents
+docker-compose -f docker-compose.agents.yml up -d
+
+# Check agent status
+docker-compose -f docker-compose.agents.yml ps
+
+# View agent logs
+docker-compose -f docker-compose.agents.yml logs -f master-orchestrator
+```
+
+### Option 2: Run Agents Locally (Development)
+
+```bash
+# Activate virtual environment
+source agents/venv/bin/activate
+
+# Run Master Orchestrator
+python agents/master_orchestrator/agent.py &
+
+# Run Intent Router
+python agents/intent_router/agent.py &
+
+# Run Aerodynamics Agent
+python agents/aerodynamics/agent.py &
+
+# Run ML Surrogate Agent
+python agents/ml_surrogate/agent.py &
+
+# Run Quantum Optimizer Agent
+python agents/quantum_optimizer/agent.py &
+
+# Run Physics Validator Agent
+python agents/physics_validator/agent.py &
+
+# Run Analysis Agent
+python agents/analysis/agent.py &
+
+# Run Visualization Agent
+python agents/visualization/agent.py &
+```
+
+### Agent Startup Order
+
+1. **NATS** (infrastructure)
+2. **Master Orchestrator** (coordinator)
+3. **Intent Router** (request routing)
+4. **Specialized Agents** (parallel)
+
+---
+
+## ✅ Testing & Verification
+
+### Test 1: Agent Health Check
+
+```bash
+# Check all agents are connected to NATS
+curl http://localhost:8222/connz | jq '.connections[] | .name'
+```
+
+Expected output: List of 8 agent connections
+
+### Test 2: Send Test Request
+
+```python
+# test_agent_system.py
+import asyncio
+from agents.utils.nats_client import NATSClient
+
+async def test_system():
+    nats = NATSClient()
+    await nats.connect()
+    
+    # Test Master Orchestrator
+    response = await nats.request(
+        "agent.orchestrator.query",
+        {
+            "query": "Optimize this wing for maximum downforce",
+            "mesh_id": "wing_v3.2"
+        },
+        timeout=30.0
+    )
+    
+    print("Response:", response)
+    await nats.disconnect()
+
+asyncio.run(test_system())
+```
+
+Run test:
+```bash
+python test_agent_system.py
+```
+
+### Test 3: Frontend Integration
+
+```bash
+# Start frontend
+cd frontend
+npm install
+npm start
+
+# Open browser
+open http://localhost:3000
+
+# Navigate to Claude Chat Interface
+# Send test message: "Analyze wing aerodynamics"
+```
+
+---
+
+## 🔍 Monitoring & Observability
+
+### Prometheus Metrics
+
+```bash
+# Access Prometheus
+open http://localhost:9090
+
+# Query agent metrics
+agent_requests_total
+agent_response_time_seconds
+claude_api_calls_total
+```
+
+### Grafana Dashboards
+
+```bash
+# Access Grafana
+open http://localhost:3001
+
+# Login: admin / admin
+# Import dashboard: dashboards/agent-monitoring.json
+```
+
+### Agent Logs
+
+```bash
+# View all agent logs
+docker-compose -f docker-compose.agents.yml logs -f
+
+# View specific agent
+docker-compose -f docker-compose.agents.yml logs -f aerodynamics-agent
+
+# View NATS logs
+docker logs qaero-nats -f
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Issue: "ANTHROPIC_API_KEY not found"
+
+**Solution:**
+```bash
+# Verify .env file exists
+ls -la agents/.env
+
+# Check API key is set
+grep ANTHROPIC_API_KEY agents/.env
+
+# Reload environment
+source agents/.env
+```
+
+### Issue: "Cannot connect to NATS"
+
+**Solution:**
+```bash
+# Check NATS is running
+docker ps | grep nats
+
+# Restart NATS
+docker-compose -f docker-compose.agents.yml restart nats
+
+# Check NATS logs
+docker logs qaero-nats
+
+# Verify port 4222 is open
+lsof -i :4222
+```
+
+### Issue: "Claude API rate limit exceeded"
+
+**Solution:**
+```bash
+# Check your API usage at console.anthropic.com
+# Implement rate limiting in .env:
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_MAX_REQUESTS=50
+RATE_LIMIT_WINDOW_SECONDS=60
+```
+
+### Issue: "Agent not responding"
+
+**Solution:**
+```bash
+# Check agent logs
+docker-compose -f docker-compose.agents.yml logs agent-name
+
+# Restart specific agent
+docker-compose -f docker-compose.agents.yml restart agent-name
+
+# Verify NATS connection
+curl http://localhost:8222/connz
+```
+
+### Issue: "Out of memory"
+
+**Solution:**
+```bash
+# Increase Docker memory limit
+# Edit docker-compose.agents.yml:
+services:
+  master-orchestrator:
+    mem_limit: 8g  # Increase from 4g
+
+# Restart services
+docker-compose -f docker-compose.agents.yml down
+docker-compose -f docker-compose.agents.yml up -d
+```
+
+---
+
+## 📊 Performance Tuning
+
+### Agent Replicas
+
+For high load, scale agents horizontally:
+
+```yaml
+# docker-compose.agents.yml
+services:
+  ml-agent:
+    deploy:
+      replicas: 3  # Run 3 instances
+```
+
+### NATS Configuration
+
+Optimize NATS for throughput:
+
+```bash
+# .env
+NATS_MAX_PAYLOAD=10485760  # 10MB
+NATS_MAX_PENDING=1048576000  # 1GB
+```
+
+### Claude API Optimization
+
+```bash
+# .env
+ANTHROPIC_MAX_TOKENS=2048  # Reduce for faster responses
+ANTHROPIC_TEMPERATURE=0.1  # Lower for more deterministic
+CACHE_ENABLED=true  # Enable response caching
+CACHE_TTL=3600  # 1 hour cache
+```
+
+---
+
+## 🔐 Security Best Practices
+
+1. **Never commit .env file** (already in .gitignore)
+2. **Rotate API keys regularly** (every 90 days)
+3. **Use environment-specific keys** (dev/staging/prod)
+4. **Enable rate limiting** (prevent abuse)
+5. **Monitor API usage** (track costs)
+6. **Use JWT authentication** (for agent-to-agent)
+7. **Enable TLS for NATS** (production)
+
+---
+
+## 📚 Additional Resources
+
+- [Anthropic Claude Documentation](https://docs.anthropic.com/)
+- [NATS Documentation](https://docs.nats.io/)
+- [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
+- [Docker Compose Documentation](https://docs.docker.com/compose/)
+
+---
+
+## 🎯 Quick Start Checklist
+
+- [ ] Python 3.10+ installed
+- [ ] Docker & Docker Compose installed
+- [ ] Claude API key obtained
+- [ ] Virtual environment created
+- [ ] Dependencies installed
+- [ ] .env file configured
+- [ ] NATS started
+- [ ] Agents deployed
+- [ ] System tested
+- [ ] Frontend connected
+
+---
+
+## 💡 Tips for Success
+
+1. **Start small**: Test with Master Orchestrator first
+2. **Monitor logs**: Watch agent logs during development
+3. **Use mock data**: Test without backend services initially
+4. **Cache responses**: Enable caching to reduce API costs
+5. **Scale gradually**: Add agents as needed
+6. **Monitor costs**: Track Claude API usage
+7. **Version control**: Commit working configurations
+
+---
+
+## 🚀 Next Steps
+
+After setup is complete:
+
+1. **Test each agent individually**
+2. **Run end-to-end workflow**
+3. **Integrate with frontend**
+4. **Deploy to production**
+5. **Set up monitoring**
+6. **Configure alerts**
+7. **Optimize performance**
+
+---
+
+**🎉 You're ready to use the GenAI Multi-Agent System!**
+
+For support, check the troubleshooting section or review agent logs.
