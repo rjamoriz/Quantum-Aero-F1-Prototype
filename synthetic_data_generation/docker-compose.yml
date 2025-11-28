@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # Tier 1: Fast VLM generation
+  tier1-generator:
+    build: .
+    container_name: f1-tier1-generator
+    command: python3 batch_orchestrator.py --tier1 5000 --workers 8 --output /data/tier1
+    volumes:
+      - ./data:/data
+      - ./synthetic_data_generation:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 16G
+  
+  # Tier 2: Transient simulations
+  tier2-generator:
+    build: .
+    container_name: f1-tier2-generator
+    command: python3 batch_orchestrator.py --tier2 1000 --workers 4 --output /data/tier2
+    volumes:
+      - ./data:/data
+      - ./synthetic_data_generation:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+  
+  # Tier 3: High-fidelity CFD (requires OpenFOAM)
+  tier3-generator:
+    image: openfoam/openfoam9-paraview56
+    container_name: f1-tier3-generator
+    command: /bin/bash -c "source /opt/openfoam9/etc/bashrc && python3 tier3_cfd_runner.py"
+    volumes:
+      - ./data:/data
+      - ./synthetic_data_generation:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        limits:
+          cpus: '16'
+          memory: 32G
+  
+  # Tier 4: ML augmentation (requires GPU)
+  tier4-ml-augmentation:
+    build: .
+    container_name: f1-tier4-ml
+    command: python3 tier4_ml_augmentation.py --input /data/tier1 --output /data/tier4
+    volumes:
+      - ./data:/data
+      - ./synthetic_data_generation:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        limits:
+          memory: 16G
+  
+  # Dask scheduler for distributed computing
+  dask-scheduler:
+    image: daskdev/dask:latest
+    container_name: f1-dask-scheduler
+    command: dask-scheduler
+    ports:
+      - "8786:8786"
+      - "8787:8787"
+  
+  # Dask workers
+  dask-worker:
+    image: daskdev/dask:latest
+    command: dask-worker dask-scheduler:8786 --nthreads 4 --memory-limit 8GB
+    volumes:
+      - ./data:/data
+    depends_on:
+      - dask-scheduler
+    deploy:
+      replicas: 4
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+
+volumes:
+  data:
+    driver: local
