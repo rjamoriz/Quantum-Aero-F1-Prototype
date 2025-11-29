@@ -1,6 +1,8 @@
 # Aeroelastic Implementation Analysis
 ## Quantum-Aero F1 Prototype - Aeroelastic Components Status
 
+![F1 Racing](../assets/F1.jpg)
+
 **Date**: November 26, 2025  
 **Status**: Comprehensive Analysis  
 **Document**: AEROELASTIC.md Verification
