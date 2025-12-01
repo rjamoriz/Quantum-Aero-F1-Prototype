@@ -1,6 +1,6 @@
 # 🏎️⚛️ Quantum-Aero F1 Prototype - Evolution Platform
 
-![F1 Quantum Aerodynamics](https://raw.githubusercontent.com/rjamoriz/Quantum-Aero-F1-Prototype/main/assets/il_1588xN.7477374919_ib3h.webp)
+![F1 Quantum Aerodynamics](assets/il_1588xN.7477374919_ib3h.webp)
 
 [![Phase 1](https://img.shields.io/badge/Phase%201-70%25-blue)](Project_Development_Markdowns/IMPLEMENTATION_PROGRESS.md)
 [![Overall](https://img.shields.io/badge/Overall-32%25-green)](Project_Development_Markdowns/PROJECT_STATUS_WITH_EVOLUTION.md)
@@ -141,7 +141,7 @@ $$
 **3. QUBO Energy** (Quantum optimization):
 
 $$
-E(\mathbf{x}) = \sum_{i} h_i x_i + \sum_{i<j} J_{ij} x_i x_j \quad \text{where } \mathbf{x} \in \{0,1\}^n
+E(\mathbf{x}) = \sum_{i} h_i x_i + \sum_{i<j} J_{ij} x_i x_j \quad \text{where } \mathbf{x} \in \lbrace 0,1 \rbrace^n
 $$
 
 ### Optimization Results
