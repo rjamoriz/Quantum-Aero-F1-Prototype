@@ -1,6 +1,6 @@
 # 🏎️⚛️ Quantum-Aero F1 Prototype - Evolution Platform
 
-![Mercedes F1 W06 Hybrid](https://i.imgur.com/xQf3K9M.jpg)
+![Formula 1](https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/2019_Belgian_Grand_Prix_FP2_Verstappen.jpg/800px-2019_Belgian_Grand_Prix_FP2_Verstappen.jpg)
 
 [![Phase 1](https://img.shields.io/badge/Phase%201-70%25-blue)](Project_Development_Markdowns/IMPLEMENTATION_PROGRESS.md)
 [![Overall](https://img.shields.io/badge/Overall-32%25-green)](Project_Development_Markdowns/PROJECT_STATUS_WITH_EVOLUTION.md)
