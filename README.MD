@@ -1,8 +1,6 @@
 # 🏎️⚛️ Quantum-Aero F1 Prototype - Evolution Platform
 
-<p align="center">
-  <img src="assets/istockphoto-508152794-612x612.jpg" alt="Mercedes F1 W06 Hybrid" width="612">
-</p>
+![Mercedes F1 W06 Hybrid](https://github.com/rjamoriz/Quantum-Aero-F1-Prototype/raw/main/assets/istockphoto-508152794-612x612.jpg)
 
 [![Phase 1](https://img.shields.io/badge/Phase%201-70%25-blue)](Project_Development_Markdowns/IMPLEMENTATION_PROGRESS.md)
 [![Overall](https://img.shields.io/badge/Overall-32%25-green)](Project_Development_Markdowns/PROJECT_STATUS_WITH_EVOLUTION.md)
