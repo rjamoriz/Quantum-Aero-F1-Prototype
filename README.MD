@@ -1,7 +1,7 @@
 # 🏎️⚛️ Quantum-Aero F1 Prototype - Evolution Platform
 
 <p align="center">
-  <img src="assets/race_car_rear_wing_cfd_fi-670x300.png" alt="F1 CFD Analysis" width="670">
+  <img src="https://raw.githubusercontent.com/rjamoriz/Quantum-Aero-F1-Prototype/7663570/assets/race_car_rear_wing_cfd_fi-670x300.png" alt="F1 CFD Analysis" width="670">
 </p>
 
 [![Phase 1](https://img.shields.io/badge/Phase%201-70%25-blue)](Project_Development_Markdowns/IMPLEMENTATION_PROGRESS.md)
