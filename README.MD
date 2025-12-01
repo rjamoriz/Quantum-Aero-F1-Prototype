@@ -1,6 +1,6 @@
 # 🏎️⚛️ Quantum-Aero F1 Prototype - Evolution Platform
 
-![Mercedes F1 W06 Hybrid - 2015 Championship Winner](mercedes-f1.png)
+![Mercedes F1 W06 Hybrid - 2015 Championship Winner](https://github.com/rjamoriz/Quantum-Aero-F1-Prototype/blob/d2b39506364864bd9216b7f6893b7a2fce2688df/mercedes-f1.png?raw=true)
 
 [![Phase 1](https://img.shields.io/badge/Phase%201-70%25-blue)](Project_Development_Markdowns/IMPLEMENTATION_PROGRESS.md)
 [![Overall](https://img.shields.io/badge/Overall-32%25-green)](Project_Development_Markdowns/PROJECT_STATUS_WITH_EVOLUTION.md)
