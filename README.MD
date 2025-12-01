@@ -1,6 +1,6 @@
 # 🏎️⚛️ Quantum-Aero F1 Prototype - Evolution Platform
 
-![F1 Racing](https://raw.githubusercontent.com/rjamoriz/Quantum-Aero-F1-Prototype/main/assets/F1.jpg)
+![F1 Aerodynamics](https://raw.githubusercontent.com/rjamoriz/Quantum-Aero-F1-Prototype/main/assets/F1_Lambda2_Top-606x380.png)
 
 [![Phase 1](https://img.shields.io/badge/Phase%201-70%25-blue)](Project_Development_Markdowns/IMPLEMENTATION_PROGRESS.md)
 [![Overall](https://img.shields.io/badge/Overall-32%25-green)](Project_Development_Markdowns/PROJECT_STATUS_WITH_EVOLUTION.md)
@@ -127,22 +127,22 @@ graph TB
 ### Key Physics Equations
 
 **1. Biot-Savart Law** (VLM induced velocity):
-```
-         Γ      (r₁ × r₂)              r₁   r₂
-v_ind = ---- × --------- × (r₀ · (---- - ----))
-        4π     |r₁ × r₂|²             |r₁|  |r₂|
-```
+
+$$
+\mathbf{v}_{\text{ind}} = \frac{\Gamma}{4\pi} \times \frac{\mathbf{r}_1 \times \mathbf{r}_2}{|\mathbf{r}_1 \times \mathbf{r}_2|^2} \times \left(\mathbf{r}_0 \cdot \left(\frac{\mathbf{r}_1}{|\mathbf{r}_1|} - \frac{\mathbf{r}_2}{|\mathbf{r}_2|}\right)\right)
+$$
 
 **2. Kutta-Joukowski Theorem** (Lift from circulation):
-```
-dF = ρ × V_∞ × (Γ × dl)
-```
+
+$$
+d\mathbf{F} = \rho \times \mathbf{V}_{\infty} \times (\Gamma \times d\mathbf{l})
+$$
 
 **3. QUBO Energy** (Quantum optimization):
-```
-E(x) = Σᵢ hᵢxᵢ + Σᵢⱼ Jᵢⱼxᵢxⱼ
-where x ∈ {0,1}^n (binary variables)
-```
+
+$$
+E(\mathbf{x}) = \sum_{i} h_i x_i + \sum_{i<j} J_{ij} x_i x_j \quad \text{where } \mathbf{x} \in \{0,1\}^n
+$$
 
 ### Optimization Results
 
@@ -186,10 +186,10 @@ where x ∈ {0,1}^n (binary variables)
 ### **2. Quantum Optimization Engine - QUBO for Drag Minimization**
 
 **QUBO Formulation**:
-```
-Minimize: E(x) = Σᵢ hᵢxᵢ + Σᵢⱼ Jᵢⱼxᵢxⱼ
-where xᵢ ∈ {0,1} are design variables
-```
+
+$$
+\text{Minimize: } E(\mathbf{x}) = \sum_{i} h_i x_i + \sum_{i<j} J_{ij} x_i x_j \quad \text{where } x_i \in \{0,1\}
+$$
 
 **Design Variables** (20 qubits):
 - Flap angle: 5 bits → -15° to +15°
@@ -197,13 +197,16 @@ where xᵢ ∈ {0,1} are design variables
 - Twist: 5 bits → washout angle
 
 **Multi-Objective**:
-```javascript
-E_total = w₁·CD + w₂·(-CL) + w₃·flutter + w₄·mass
-// w₁=3.0 (drag priority)
-// w₂=2.5 (downforce)
-// w₃=2.0 (flutter safety)
-// w₄=1.0 (mass)
-```
+
+$$
+E_{\\text{total}} = w_1 \\cdot C_D + w_2 \\cdot (-C_L) + w_3 \\cdot \\text{flutter} + w_4 \\cdot \\text{mass}
+$$
+
+where:
+- $w_1 = 3.0$ (drag priority)
+- $w_2 = 2.5$ (downforce)
+- $w_3 = 2.0$ (flutter safety)
+- $w_4 = 1.0$ (mass)
 
 **Solver**: QAOA (Quantum Approximate Optimization Algorithm)
 - 3 quantum circuit layers
