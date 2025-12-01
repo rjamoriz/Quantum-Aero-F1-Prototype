@@ -317,6 +317,8 @@ flowchart TB
     style Backend fill:#1e293b,stroke:#10b981,stroke-width:3px,color:#fff
     style Data fill:#1e293b,stroke:#ec4899,stroke-width:3px,color:#fff
     style AI_Agents fill:#1e293b,stroke:#7c3aed,stroke-width:3px,color:#fff
+```
+
 ## 🔧 Technologies
 
 ### **Frontend**
