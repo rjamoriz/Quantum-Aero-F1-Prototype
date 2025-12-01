@@ -1,6 +1,8 @@
 # 🏎️⚛️ Quantum-Aero F1 Prototype - Evolution Platform
 
-![F1 Quantum Aerodynamics](assets/il_1588xN.7477374919_ib3h.webp)
+<p align="center">
+  <img src="assets/race_car_rear_wing_cfd_fi-670x300.png" alt="F1 CFD Analysis" width="670">
+</p>
 
 [![Phase 1](https://img.shields.io/badge/Phase%201-70%25-blue)](Project_Development_Markdowns/IMPLEMENTATION_PROGRESS.md)
 [![Overall](https://img.shields.io/badge/Overall-32%25-green)](Project_Development_Markdowns/PROJECT_STATUS_WITH_EVOLUTION.md)
@@ -127,22 +129,19 @@ graph TB
 ### Key Physics Equations
 
 **1. Biot-Savart Law** (VLM induced velocity):
-
-$$
-\mathbf{v}_{\text{ind}} = \frac{\Gamma}{4\pi} \times \frac{\mathbf{r}_1 \times \mathbf{r}_2}{|\mathbf{r}_1 \times \mathbf{r}_2|^2} \times \left(\mathbf{r}_0 \cdot \left(\frac{\mathbf{r}_1}{|\mathbf{r}_1|} - \frac{\mathbf{r}_2}{|\mathbf{r}_2|}\right)\right)
-$$
+```
+v_ind = (Γ/4π) × [(r₁ × r₂) / |r₁ × r₂|²] × [r₀ · (r₁/|r₁| - r₂/|r₂|)]
+```
 
 **2. Kutta-Joukowski Theorem** (Lift from circulation):
-
-$$
-d\mathbf{F} = \rho \times \mathbf{V}_{\infty} \times (\Gamma \times d\mathbf{l})
-$$
+```
+dF = ρ × V∞ × (Γ × dl)
+```
 
 **3. QUBO Energy** (Quantum optimization):
-
-$$
-E(\mathbf{x}) = \sum_{i} h_i x_i + \sum_{i<j} J_{ij} x_i x_j \quad \text{where } \mathbf{x} \in \lbrace 0,1 \rbrace^n
-$$
+```
+E(x) = Σᵢ hᵢxᵢ + Σᵢⱼ Jᵢⱼxᵢxⱼ  where x ∈ {0,1}ⁿ
+```
 
 ### Optimization Results
 
@@ -186,10 +185,9 @@ $$
 ### **2. Quantum Optimization Engine - QUBO for Drag Minimization**
 
 **QUBO Formulation**:
-
-$$
-\text{Minimize: } E(\mathbf{x}) = \sum_{i} h_i x_i + \sum_{i<j} J_{ij} x_i x_j \quad \text{where } x_i \in \{0,1\}
-$$
+```
+Minimize: E(x) = Σᵢ hᵢxᵢ + Σᵢⱼ Jᵢⱼxᵢxⱼ  where xᵢ ∈ {0,1}
+```
 
 **Design Variables** (20 qubits):
 - Flap angle: 5 bits → -15° to +15°
@@ -197,16 +195,11 @@ $$
 - Twist: 5 bits → washout angle
 
 **Multi-Objective**:
+```
+E_total = w₁·CD + w₂·(-CL) + w₃·flutter + w₄·mass
 
-$$
-E_{\\text{total}} = w_1 \\cdot C_D + w_2 \\cdot (-C_L) + w_3 \\cdot \\text{flutter} + w_4 \\cdot \\text{mass}
-$$
-
-where:
-- $w_1 = 3.0$ (drag priority)
-- $w_2 = 2.5$ (downforce)
-- $w_3 = 2.0$ (flutter safety)
-- $w_4 = 1.0$ (mass)
+Weights: w₁=3.0 (drag), w₂=2.5 (downforce), w₃=2.0 (flutter), w₄=1.0 (mass)
+```
 
 **Solver**: QAOA (Quantum Approximate Optimization Algorithm)
 - 3 quantum circuit layers
