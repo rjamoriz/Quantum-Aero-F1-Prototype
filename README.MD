@@ -1,6 +1,6 @@
 # 🏎️⚛️ Quantum-Aero F1 Prototype - Evolution Platform
 
-![F1 Aerodynamics](https://raw.githubusercontent.com/rjamoriz/Quantum-Aero-F1-Prototype/main/assets/F1_Lambda2_Top-606x380.png)
+![F1 Quantum Aerodynamics](https://raw.githubusercontent.com/rjamoriz/Quantum-Aero-F1-Prototype/main/assets/il_1588xN.7477374919_ib3h.webp)
 
 [![Phase 1](https://img.shields.io/badge/Phase%201-70%25-blue)](Project_Development_Markdowns/IMPLEMENTATION_PROGRESS.md)
 [![Overall](https://img.shields.io/badge/Overall-32%25-green)](Project_Development_Markdowns/PROJECT_STATUS_WITH_EVOLUTION.md)
